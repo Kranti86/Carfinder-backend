@@ -55,6 +55,9 @@ class Reservation(Base):
     customer_name: Mapped[str] = mapped_column(String(160), default="")
     customer_email: Mapped[str] = mapped_column(String(255), default="", index=True)
     customer_phone: Mapped[str] = mapped_column(String(40), default="")
+    # Billing address bits PayPal returns with the hold (for Customer Match address matching)
+    billing_zip: Mapped[str] = mapped_column(String(20), default="")
+    billing_country: Mapped[str] = mapped_column(String(2), default="")
 
     # trip
     city: Mapped[str] = mapped_column(String(120), default="")
