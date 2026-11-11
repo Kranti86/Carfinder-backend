@@ -11,8 +11,11 @@ configured (no EMAIL_SENDER/EMAIL_PASSWORD) they no-op, so the flow works before
 
 from __future__ import annotations
 
+import base64
 import logging
 import smtplib
+
+import httpx
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -29,14 +32,50 @@ def _money(v) -> str:
         return "$0.00"
 
 
+BREVO_URL = "https://api.brevo.com/v3/smtp/email"
+
+
+def _send_brevo(s, to: str, subject: str, html: str, bcc: list[str],
+                attachments: list[tuple[bytes, str]]) -> bool:
+    """Send through Brevo's HTTPS API (works where outbound SMTP is blocked, e.g. Railway
+    Free/Trial/Hobby)."""
+    body: dict = {
+        "sender": {"name": s.email_from_name or s.brand_name, "email": s.email_sender},
+        "to": [{"email": to}],
+        "subject": subject,
+        "htmlContent": html,
+    }
+    if bcc:
+        body["bcc"] = [{"email": a} for a in bcc]
+    if s.support_email:
+        body["replyTo"] = {"email": s.support_email}
+    files = [{"content": base64.b64encode(blob).decode(), "name": name}
+             for blob, name in attachments if blob]
+    if files:
+        body["attachment"] = files
+    try:
+        r = httpx.post(BREVO_URL, json=body, timeout=20,
+                       headers={"api-key": s.brevo_api_key, "accept": "application/json"})
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("email send failed via Brevo (%s): %s", subject, exc)
+        return False
+    if r.status_code >= 300:
+        logger.warning("email send failed via Brevo (%s): HTTP %s %s",
+                       subject, r.status_code, r.text[:300])
+        return False
+    return True
+
+
 def _send(to: str, subject: str, html: str, bcc: list[str] | None = None,
           attachments: list[tuple[bytes, str]] | None = None) -> bool:
     s = get_settings()
     if not s.email_configured or not to:
         logger.info("email not sent (unconfigured or no recipient): %s", subject)
         return False
+    if s.brevo_api_key:
+        return _send_brevo(s, to, subject, html, bcc or [], attachments or [])
     msg = MIMEMultipart("mixed")
-    msg["From"] = f"{s.brand_name} <{s.email_sender}>"
+    msg["From"] = f"{s.email_from_name or s.brand_name} <{s.email_sender}>"
     msg["To"] = to
     msg["Subject"] = subject
     if s.support_email:
@@ -52,7 +91,7 @@ def _send(to: str, subject: str, html: str, bcc: list[str] | None = None,
     try:
         srv = smtplib.SMTP(s.smtp_server, s.smtp_port, timeout=20)
         srv.starttls()
-        srv.login(s.email_sender, s.email_password)
+        srv.login(s.smtp_username or s.email_sender, s.email_password)
         srv.sendmail(s.email_sender, recipients, msg.as_string())
         srv.quit()
         return True
