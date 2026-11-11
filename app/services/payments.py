@@ -37,6 +37,29 @@ class PayResult:
     message: str = ""
     live: bool = False     # True if it actually hit PayPal
     amount: float | None = None  # amount PayPal actually authorized/captured, if reported
+    billing: dict | None = None  # {"zip": ..., "country": ...} from the payer, when PayPal shares it
+
+
+def _billing_from_order(data: dict) -> dict:
+    """Best-effort billing ZIP + country from an Orders v2 response.
+
+    Card payments carry payment_source.card.billing_address; PayPal-wallet payments
+    carry payer.address (country, sometimes postal code) and the shipping address.
+    """
+    cands = []
+    ps = data.get("payment_source") or {}
+    for key in ("card", "paypal", "venmo"):
+        src = ps.get(key) or {}
+        cands.append(src.get("billing_address") or {})
+        cands.append(src.get("address") or {})
+    cands.append((data.get("payer") or {}).get("address") or {})
+    for pu in data.get("purchase_units") or []:
+        cands.append(((pu.get("shipping") or {}).get("address")) or {})
+    zip_, country = "", ""
+    for a in cands:
+        zip_ = zip_ or str(a.get("postal_code") or "").strip()
+        country = country or str(a.get("country_code") or "").strip().upper()
+    return {"zip": zip_[:20], "country": country[:2]}
 
 
 def _creds():
@@ -189,7 +212,15 @@ async def authorize(amount: float, order_id: str, *, reservation_id: str) -> Pay
         if status not in HELD_STATUSES + PENDING_STATUSES:
             return PayResult(ok=False, ref=auth.get("id", ""), status=status,
                              message=_decline_reason(auth), live=True, amount=held)
-        return PayResult(ok=True, ref=auth["id"], status=status, live=True, amount=held)
+        billing = _billing_from_order(data)
+        if not billing["zip"]:
+            ok2, order = await _get(f"/v2/checkout/orders/{order_id}")
+            if ok2:
+                more = _billing_from_order(order)
+                billing = {"zip": billing["zip"] or more["zip"],
+                           "country": billing["country"] or more["country"]}
+        return PayResult(ok=True, ref=auth["id"], status=status, live=True, amount=held,
+                         billing=billing)
     return PayResult(ok=False, message=data.get("message", "authorize failed"), live=True)
 
 

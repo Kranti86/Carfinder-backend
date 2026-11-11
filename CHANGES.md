@@ -28,3 +28,12 @@
 - **Ops**: `/metrics` needs a token (hidden if none set); `/docs` off unless `ENABLE_DOCS=true`.
 - Portal list counts use one GROUP BY query. `greenlet` pinned. Docs updated.
 - Tests: `tests/test_checkout.py` (16 new; 69 total passing).
+
+## Customer Match: all identifiers + value segments
+- Reservations now store `billing_zip` / `billing_country`, taken from PayPal's order
+  (card billing address, or the PayPal payer/shipping address) when the hold is placed.
+- Audience CSVs use Google's full hashed format: Email, Phone, First Name, Last Name
+  (SHA-256) + Country, Zip (clear). Address columns are filled only when all four parts exist.
+- New segments: `high-value` (top 20% by lifetime booking value; optional
+  `HIGH_VALUE_MIN_USD` floor), `recent-customers` (90 days), `lapsed-customers`
+  (180+ days, win-back), `unconverted` (reserved but never paid).

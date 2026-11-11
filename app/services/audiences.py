@@ -1,8 +1,10 @@
 """Google Ads Customer Match lists built from reservations.
 
-Each segment is a CSV in Google's "hashed data file" format: the headers Google
-expects ("Email", "Phone"), values normalised the way Google specifies, then
-SHA-256 hashed (hex), so no raw email or phone ever leaves the server.
+Each segment is a CSV in Google's "hashed data file" format with every identifier
+Google can match on: Email, Phone, First Name, Last Name (normalised + SHA-256),
+plus Country and Zip (sent in clear, as Google requires). More identifiers per
+person = a higher match rate, so we send all four groups whenever we have them.
+No raw email, phone or name ever leaves the server.
 
 Upload a segment in Google Ads → Tools → Audience manager → + → Customer list →
 "Upload hashed data". Use "Replace all data" when refreshing a list.
@@ -17,7 +19,10 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import os
 import re
+import unicodedata
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
@@ -25,12 +30,17 @@ from ..models_db import Reservation
 
 SEGMENTS: dict[str, str] = {
     "customers": "Confirmed customers: paid, confirmed or completed rentals",
-    "all-bookers": "Everyone who made a reservation (incl. unpaid / cancelled)",
-    "cancelled": "Reservations that were cancelled, refunded or voided",
+    "high-value": "Top 20% of customers by lifetime booking value (lookalike / bid-up seed)",
     "repeat-customers": "Customers with 2 or more confirmed rentals",
+    "recent-customers": "Customers with a confirmed rental in the last 90 days",
+    "lapsed-customers": "Past customers with no rental in 180+ days (win-back)",
     "insurance-buyers": "Confirmed customers who bought insurance",
+    "unconverted": "Started a reservation but never paid (re-engage)",
+    "cancelled": "Reservations that were cancelled, refunded or voided",
+    "all-bookers": "Everyone who made a reservation (incl. unpaid / cancelled)",
 }
 
+CSV_HEADER = ["Email", "Phone", "First Name", "Last Name", "Country", "Zip"]
 _CONFIRMED_STATUS = {"captured", "confirmed", "fulfilled"}
 _CANCELLED = {"cancelled"}
 _TEST_DOMAINS = ("example.com", "example.org", "example.net", "test.com", "mailinator.com")
@@ -79,8 +89,44 @@ def _cancelled(r: Reservation) -> bool:
     return r.status in _CANCELLED or r.payment_status in ("refunded", "voided")
 
 
-async def collect(session, segment: str) -> list[tuple[str, str]]:
-    """[(email_norm, phone_norm)] for a segment, de-duplicated by person."""
+def normalize_name(name: str) -> str:
+    """Google: lowercase, no punctuation or accents' marks kept as letters, no spaces at ends."""
+    n = unicodedata.normalize("NFKC", (name or "")).strip().lower()
+    n = re.sub(r"[^\w\s'-]", "", n)          # drop punctuation except hyphen/apostrophe
+    n = re.sub(r"[\d_]", "", n)
+    return re.sub(r"\s+", " ", n).strip()
+
+
+def split_name(full: str) -> tuple[str, str]:
+    parts = [p for p in normalize_name(full).split(" ") if p]
+    if len(parts) < 2:
+        return "", ""
+    return parts[0], parts[-1]
+
+
+def normalize_zip(zip_: str, country: str) -> str:
+    z = (zip_ or "").strip().upper()
+    if country == "US":
+        d = re.sub(r"\D", "", z)
+        return d[:5] if len(d) >= 5 else ""
+    return re.sub(r"\s+", " ", z)[:10]
+
+
+def _value(r: Reservation) -> float:
+    """Total booking value: rental price + what we charged online."""
+    paid = r.amount_captured or r.pay_now_total
+    return round((r.base_price or 0) + (paid or 0), 2)
+
+
+def _when(r: Reservation) -> datetime | None:
+    d = r.created_at
+    if d is not None and d.tzinfo is None:
+        d = d.replace(tzinfo=timezone.utc)
+    return d
+
+
+async def collect_people(session, segment: str) -> list[dict]:
+    """People in a segment, de-duplicated by email (or phone), with every identifier."""
     if segment not in SEGMENTS:
         raise KeyError(segment)
     rows = (await session.execute(select(Reservation))).scalars().all()
@@ -93,35 +139,70 @@ async def collect(session, segment: str) -> list[tuple[str, str]]:
         key = email or phone
         if not key:
             continue
-        p = people.setdefault(key, {"email": email, "phone": phone, "confirmed": 0,
-                                    "cancelled": 0, "any": 0, "insured": 0})
+        first, last = split_name(r.customer_name)
+        country = (r.billing_country or "").strip().upper()
+        zip_ = normalize_zip(r.billing_zip, country)
+        p = people.setdefault(key, {"email": email, "phone": phone, "first": first,
+                                    "last": last, "country": country, "zip": zip_,
+                                    "confirmed": 0, "cancelled": 0, "any": 0,
+                                    "insured": 0, "value": 0.0, "last_confirmed": None})
         p["phone"] = p["phone"] or phone
+        if not (p["first"] and p["last"]):
+            p["first"], p["last"] = first, last
+        if not (p["country"] and p["zip"]) and country and zip_:
+            p["country"], p["zip"] = country, zip_
         p["any"] += 1
         if _confirmed(r) and not _cancelled(r):
             p["confirmed"] += 1
+            p["value"] += _value(r)
+            when = _when(r)
+            if when and (p["last_confirmed"] is None or when > p["last_confirmed"]):
+                p["last_confirmed"] = when
             if (r.insurance_price or 0) > 0:
                 p["insured"] += 1
         if _cancelled(r):
             p["cancelled"] += 1
 
+    everyone = list(people.values())
+    now = datetime.now(timezone.utc)
+
+    if segment == "high-value":
+        buyers = sorted((p for p in everyone if p["confirmed"] >= 1),
+                        key=lambda p: p["value"], reverse=True)
+        floor = float(os.environ.get("HIGH_VALUE_MIN_USD", "0") or 0)
+        top_n = max(1, -(-len(buyers) // 5)) if buyers else 0      # top 20%, at least 1
+        return [p for i, p in enumerate(buyers) if i < top_n or (floor and p["value"] >= floor)]
+
     def keep(p: dict) -> bool:
+        lc = p["last_confirmed"]
         return {
             "customers": p["confirmed"] >= 1,
             "all-bookers": p["any"] >= 1,
             "cancelled": p["cancelled"] >= 1 and p["confirmed"] == 0,
             "repeat-customers": p["confirmed"] >= 2,
             "insurance-buyers": p["insured"] >= 1,
+            "recent-customers": lc is not None and lc >= now - timedelta(days=90),
+            "lapsed-customers": lc is not None and lc < now - timedelta(days=180),
+            "unconverted": p["confirmed"] == 0 and p["cancelled"] == 0,
         }[segment]
 
-    return [(p["email"], p["phone"]) for p in people.values() if keep(p)]
+    return [p for p in everyone if keep(p)]
+
+
+async def collect(session, segment: str) -> list[tuple[str, str]]:
+    """[(email_norm, phone_norm)] for a segment (kept for callers that only need ids)."""
+    return [(p["email"], p["phone"]) for p in await collect_people(session, segment)]
 
 
 async def audience_csv(session, segment: str) -> tuple[str, int]:
-    """(csv_text, row_count): Google Customer Match hashed file (Email, Phone)."""
-    people = await collect(session, segment)
+    """(csv_text, row_count): Google Customer Match hashed file, all identifiers."""
+    people = await collect_people(session, segment)
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["Email", "Phone"])
-    for email, phone in people:
-        w.writerow([_sha(email), _sha(phone)])
+    w.writerow(CSV_HEADER)
+    for p in people:
+        # Google only matches on address when name + country + zip are all present.
+        full_addr = p["first"] and p["last"] and p["country"] and p["zip"]
+        w.writerow([_sha(p["email"]), _sha(p["phone"]), _sha(p["first"]), _sha(p["last"]),
+                    p["country"] if full_addr else "", p["zip"] if full_addr else ""])
     return buf.getvalue(), len(people)

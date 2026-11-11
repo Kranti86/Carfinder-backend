@@ -279,6 +279,9 @@ async def create_request(request: Request, background: BackgroundTasks,
     amount = r.pay_now_total
     if order_id and amount > 0:
         res = await payments.authorize(amount, order_id, reservation_id=r.id)
+        if res.billing:
+            r.billing_zip = res.billing.get("zip", "") or r.billing_zip
+            r.billing_country = res.billing.get("country", "") or r.billing_country
         if res.ok and res.amount is not None and abs(res.amount - amount) > 0.005:
             # Held amount doesn't match what we priced: release it, don't keep it.
             await payments.void(res.ref)

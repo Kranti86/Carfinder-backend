@@ -80,8 +80,8 @@ def test_segments_and_exclusions(client):
         async with session_factory()() as s:
             return (await audiences.audience_csv(s, "customers"))[0]
     text = run(client, csv_text)
-    assert text.splitlines()[0] == "Email,Phone"
-    assert f"{H(ann)},{H('+15550001111')}" in text          # hashed, never raw
+    assert text.splitlines()[0] == "Email,Phone,First Name,Last Name,Country,Zip"
+    assert f"{H(ann)},{H('+15550001111')},{H('ann')},{H('lee')}" in text          # hashed, never raw
     assert ann not in text and "5550001111" not in text
     assert H(em("dan")) not in text                          # opted out
 
@@ -94,7 +94,7 @@ def test_audience_endpoints_protected(client):
         assert client.get("/exports/audience/customers.csv?key=bad").status_code == 403
         assert client.get("/exports/audience/nope.csv?key=tok123").status_code == 404
         r = client.get("/exports/audience/customers.csv?key=tok123")
-        assert r.status_code == 200 and r.text.startswith("Email,Phone")
+        assert r.status_code == 200 and r.text.startswith("Email,Phone,First Name")
     finally:
         s.conversions_export_token = old
     # admin pages need a login
@@ -105,7 +105,7 @@ def test_audience_endpoints_protected(client):
     dl = client.get("/admin/audience/all-bookers.csv")
     client.cookies.clear()
     assert page.status_code == 200 and "repeat-customers" in page.text
-    assert dl.status_code == 200 and dl.text.startswith("Email,Phone")
+    assert dl.status_code == 200 and dl.text.startswith("Email,Phone,First Name")
 
 
 def test_reject_cookie_flag_saved(client):
@@ -115,3 +115,55 @@ def test_reject_cookie_flag_saved(client):
         "job_id": job, "vehicle_id": vid, "customer": CUSTOMER,
         "source": {"consent": "denied"}}).json()
     assert run(client, _get_res, d["id"]).ads_opt_out is True
+
+
+def test_names_zip_normalised():
+    assert audiences.split_name("  María-José  O'Neil Jr. ") == ("maría-josé", "jr")
+    assert audiences.split_name("Cher") == ("", "")
+    assert audiences.normalize_zip("94107-1234", "US") == "94107"
+    assert audiences.normalize_zip("m5v 3l9", "CA") == "M5V 3L9"
+    assert audiences.normalize_zip("1234", "US") == ""
+
+
+def test_value_segments_and_address(client):
+    from datetime import datetime, timedelta, timezone
+    tag = uuid.uuid4().hex[:6]
+    em = lambda n: f"{n}.{tag}@mail.co"
+    old = datetime.now(timezone.utc) - timedelta(days=400)
+    rows = [dict(customer_name=f"Big Spender", customer_email=em("big"), customer_phone="5550009999",
+                 status="captured", payment_status="captured", base_price=900.0, service_fee=20.0,
+                 billing_zip="94107-1234", billing_country="US")]
+    rows += [dict(customer_name=f"Small {i}", customer_email=em(f"s{i}"), status="captured",
+                  payment_status="captured", base_price=40.0, service_fee=5.0) for i in range(4)]
+    rows += [dict(customer_name="Old Timer", customer_email=em("old"), status="captured",
+                  payment_status="captured", base_price=50.0, created_at=old),
+             dict(customer_name="Never Paid", customer_email=em("np"), status="new",
+                  payment_status="none")]
+    run(client, _seed, rows)
+
+    async def seg(name):
+        async with session_factory()() as s:
+            return {p["email"] for p in await audiences.collect_people(s, name) if tag in p["email"]}
+    assert em("big") in run(client, seg, "high-value")
+    assert em("s0") not in run(client, seg, "high-value")
+    assert em("old") in run(client, seg, "lapsed-customers")
+    assert em("old") not in run(client, seg, "recent-customers")
+    assert em("big") in run(client, seg, "recent-customers")
+    assert run(client, seg, "unconverted") == {em("np")}
+
+    async def csv_text():
+        async with session_factory()() as s:
+            return (await audiences.audience_csv(s, "high-value"))[0]
+    text = run(client, csv_text)
+    assert f"{H(em('big'))},{H('+15550009999')},{H('big')},{H('spender')},US,94107" in text
+    assert "Spender" not in text and "big." not in text
+
+
+def test_billing_from_paypal_order():
+    from app.services.payments import _billing_from_order
+    card = {"payment_source": {"card": {"billing_address": {"postal_code": "10001", "country_code": "us"}}}}
+    assert _billing_from_order(card) == {"zip": "10001", "country": "US"}
+    wallet = {"payer": {"address": {"country_code": "CA"}},
+              "purchase_units": [{"shipping": {"address": {"postal_code": "M5V 3L9", "country_code": "CA"}}}]}
+    assert _billing_from_order(wallet) == {"zip": "M5V 3L9", "country": "CA"}
+    assert _billing_from_order({}) == {"zip": "", "country": ""}
