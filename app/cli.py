@@ -74,6 +74,7 @@ async def _capture_due():
                                action="auto_capture_failed", detail=res.message))
         await s.commit()
     await notify.capture_run(captured, failed)
+    return captured, failed
 
 
 async def _daily_digest():

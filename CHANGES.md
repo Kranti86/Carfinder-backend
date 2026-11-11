@@ -57,3 +57,16 @@
   cookie banner (`ads_opt_out`), matching the audience exports and the cookie policy.
 - Admin login is rate-limited (10 attempts / 15 min per client; `LOGIN_RATE_LIMIT`,
   `LOGIN_RATE_WINDOW`) to stop password guessing.
+
+## Run it from Slack
+- `/rentals` slash command: today, untouched, open, find, `<REF>`, capture-due, users,
+  add-user, reset-password, disable-user, enable-user, whoami.
+- Buttons on every booking alert and card: Claim, Capture, Send confirmation (form with
+  supplier ref + PDF upload, emails the customer), Mark fulfilled, Refund, Cancel (form with
+  reason), Add note, Open in admin. Money buttons ask for confirmation with the amount.
+- Only Slack users listed in `SLACK_ADMINS` (`U…:admin-login-email`) can see or act;
+  actions are logged under that admin login. Every request is verified with
+  `SLACK_SIGNING_SECRET` (with replay protection). `SLACK_BOT_TOKEN` opens forms and
+  downloads attached PDFs (scopes: commands, files:read).
+- Booking actions moved to `app/services/actions.py`, shared by /admin and Slack.
+- Fix: attaching a confirmation PDF in /admin no longer errors after saving.

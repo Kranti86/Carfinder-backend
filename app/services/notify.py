@@ -49,15 +49,18 @@ def enabled() -> bool:
     return bool(os.environ.get("SLACK_WEBHOOK_URL"))
 
 
-async def slack(text: str) -> bool:
-    """Post one message. Returns True when Slack accepted it."""
+async def slack(text: str, blocks: list | None = None) -> bool:
+    """Post one message (optionally with Block Kit blocks). True when Slack accepted it."""
     url = os.environ.get("SLACK_WEBHOOK_URL")
     if not url:
         return False
+    body = {"text": text, "unfurl_links": False}
+    if blocks:
+        body["blocks"] = blocks
     try:
         import httpx
         async with httpx.AsyncClient(timeout=8) as c:
-            r = await c.post(url, json={"text": text, "unfurl_links": False})
+            r = await c.post(url, json=body)
         return r.status_code == 200
     except Exception as exc:  # noqa: BLE001 — never let a notification break anything
         logger.warning("slack notify failed: %s", type(exc).__name__)
@@ -140,7 +143,7 @@ async def new_reservation(r, amount: float) -> None:
                 f"Call the customer: {_esc(r.customer_phone) or 'no phone'}")
     else:
         head = ":new: *New reservation — no payment taken*"
-    await slack(f"{head}\n{line(r)}")
+    await slack(f"{head}\n{line(r)}", _with_buttons(f"{head}\n{line(r)}", r))
 
 
 async def payment_event(r, kind: str, detail: str = "") -> None:
@@ -161,7 +164,17 @@ async def payment_event(r, kind: str, detail: str = "") -> None:
     }
     head = icons.get(kind, kind)
     extra = f" — {_esc(detail)}" if detail else ""
-    await slack(f"{head}{extra}\n{line(r)}")
+    text = f"{head}{extra}\n{line(r)}"
+    await slack(text, _with_buttons(text, r))
+
+
+def _with_buttons(text: str, r) -> list | None:
+    """Alert text + the booking's action buttons, when Slack interactivity is set up."""
+    from . import slack_ui
+    acts = slack_ui.actions_block(r)
+    if not acts:
+        return None
+    return [{"type": "section", "text": {"type": "mrkdwn", "text": text[:3000]}}] + acts
 
 
 async def capture_run(captured: list, failed: list) -> None:
@@ -278,6 +291,12 @@ def build_digest(rows: list, audits: dict[str, list], now: datetime | None = Non
 
 
 async def send_digest(session) -> str:
+    text = await digest_text(session)
+    await slack(text)
+    return text
+
+
+async def digest_text(session) -> str:
     from sqlalchemy import or_, select
 
     from ..models_db import AuditLog, Reservation
@@ -295,6 +314,4 @@ async def send_digest(session) -> str:
         for a in (await session.execute(select(AuditLog).where(
                 AuditLog.reservation_id.in_(ids)))).scalars().all():
             audits.setdefault(a.reservation_id, []).append(a)
-    text = build_digest(rows, audits, now)
-    await slack(text)
-    return text
+    return build_digest(rows, audits, now)
