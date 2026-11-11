@@ -88,7 +88,9 @@ async def paypal_webhook(request: Request, session: AsyncSession = Depends(get_s
                              action=action, detail=detail))
 
     if etype == "PAYMENT.AUTHORIZATION.CREATED":
-        if r.payment_status in ("none", "failed"):
+        # Only an approved hold (status CREATED) counts — never flip a declined one.
+        if (str(resource.get("status", "CREATED")).upper() == "CREATED"
+                and r.payment_status in ("none", "failed", "pending")):
             r.payment_status = "authorized"
             r.payment_ref = resource.get("id", r.payment_ref)
             if r.status == "new":

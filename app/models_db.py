@@ -29,7 +29,7 @@ def _now() -> datetime:
 # Deal-funnel + payment status vocabularies (kept as plain strings for clarity)
 # --------------------------------------------------------------------------- #
 STATUS_FLOW = ["new", "authorized", "confirmed", "captured", "fulfilled", "cancelled"]
-PAYMENT_STATES = ["none", "authorized", "captured", "refunded", "voided", "failed"]
+PAYMENT_STATES = ["none", "pending", "authorized", "captured", "refunded", "voided", "failed"]
 
 
 class Agent(Base):
