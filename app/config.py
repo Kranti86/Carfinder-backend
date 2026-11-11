@@ -72,8 +72,13 @@ class Settings(BaseSettings):
     # ---- Email (confirmations + review invites) ----
     smtp_server: str = "smtp.gmail.com"
     smtp_port: int = 587
-    email_sender: str = ""          # the address emails are sent FROM (also SMTP login)
-    email_password: str = ""        # SMTP/app password
+    email_sender: str = ""          # the address emails are sent FROM
+    email_from_name: str = ""       # display name on emails (defaults to brand_name)
+    email_password: str = ""        # SMTP password / key
+    smtp_username: str = ""         # SMTP login, if different from email_sender (e.g. Brevo)
+    # Brevo transactional API (HTTPS). Preferred over SMTP: Railway blocks outbound SMTP
+    # on Free/Trial/Hobby plans. If set, emails go through the API, not SMTP.
+    brevo_api_key: str = ""
     support_email: str = ""         # shown to customers for help
     brand_name: str = "Therentalcars"
     business_name: str = "Himalayan Haze LLC"
@@ -129,7 +134,7 @@ class Settings(BaseSettings):
 
     @property
     def email_configured(self) -> bool:
-        return bool(self.email_sender and self.email_password)
+        return bool(self.email_sender and (self.brevo_api_key or self.email_password))
 
     @property
     def redis_enabled(self) -> bool:
