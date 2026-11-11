@@ -1,0 +1,14 @@
+[
+  {"name": "Miami", "slug": "miami", "lat": 25.7743, "lon": -80.1919, "iata": "MIA"},
+  {"name": "Orlando", "slug": "orlando", "lat": 28.5383, "lon": -81.3792, "iata": "MCO"},
+  {"name": "Las Vegas", "slug": "las-vegas", "lat": 36.1699, "lon": -115.1398, "iata": "LAS"},
+  {"name": "Los Angeles", "slug": "los-angeles", "lat": 34.0522, "lon": -118.2437, "iata": "LAX"},
+  {"name": "New York", "slug": "new-york", "lat": 40.7128, "lon": -74.006, "iata": "JFK"},
+  {"name": "Tampa", "slug": "tampa", "lat": 27.9506, "lon": -82.4572, "iata": "TPA"},
+  {"name": "Fort Lauderdale", "slug": "fort-lauderdale", "lat": 26.1224, "lon": -80.1373, "iata": "FLL"},
+  {"name": "Denver", "slug": "denver", "lat": 39.7392, "lon": -104.9903, "iata": "DEN"},
+  {"name": "Phoenix", "slug": "phoenix", "lat": 33.4484, "lon": -112.074, "iata": "PHX"},
+  {"name": "Dallas", "slug": "dallas", "lat": 32.7767, "lon": -96.797, "iata": "DFW"},
+  {"name": "Atlanta", "slug": "atlanta", "lat": 33.749, "lon": -84.388, "iata": "ATL"},
+  {"name": "Houston", "slug": "houston", "lat": 29.7604, "lon": -95.3698, "iata": "IAH"}
+]

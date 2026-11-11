@@ -1,0 +1,64 @@
+
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings — Therentalcars Ops</title>
+<style>
+  :root{--navy:#0b1d3a;--gold:#d4af37;--green:#12b886}
+  body{font-family:system-ui,Segoe UI,Arial,sans-serif;margin:0;background:#f4f7fb;color:#1a2233}
+  header{background:var(--navy);color:#fff;padding:12px 20px;display:flex;justify-content:space-between}
+  header b{color:var(--gold)}header a{color:#cdd6e8;text-decoration:none;font-size:.85rem}
+  .wrap{max-width:640px;margin:26px auto;padding:0 16px}
+  .card{background:#fff;border-radius:12px;padding:22px 24px;box-shadow:0 3px 12px rgba(0,0,0,.05)}
+  h3{margin:0 0 6px;color:var(--navy)}
+  p{color:#5b6680;font-size:.9rem;line-height:1.55}
+  .toggle{display:flex;align-items:center;gap:14px;margin-top:16px}
+  .state{font-weight:800}.on{color:var(--green)}.off{color:#a12727}
+  button{padding:11px 18px;border:0;border-radius:9px;font-weight:700;cursor:pointer;color:#fff}
+  .b-on{background:var(--green)}.b-off{background:#c0413f}
+  .note{margin-top:16px;background:#f0f4fa;border-radius:8px;padding:12px 14px;font-size:.83rem;color:#42506b}
+</style></head><body>
+<header><div>Therentalcars <b>Ops</b> · Settings</div>
+  <div>{{ agent.email }} · <a href="/admin/reservations">← Reservations</a></div></header>
+<div class="wrap"><div class="card">
+  <h3>Online service fee</h3>
+  <p>When <b>ON</b>, the online checkout charges the platform service fee (markup) and takes
+     payment via PayPal. When <b>OFF</b>, the site runs in <b>reservation-only</b> mode:
+     no markup is charged and customers simply reserve (pay the supplier at the counter).</p>
+  <div class="toggle">Currently:
+    <span class="state {{ 'on' if fee_on else 'off' }}">{{ 'ON — paid checkout' if fee_on else 'OFF — reservation only' }}</span>
+  </div>
+  <form method="post" action="/admin/settings" style="margin-top:14px">
+    {% if fee_on %}
+      <input type="hidden" name="enabled" value="">
+      <button class="b-off" type="submit">Turn service fee OFF</button>
+    {% else %}
+      <input type="hidden" name="enabled" value="on">
+      <button class="b-on" type="submit">Turn service fee ON</button>
+    {% endif %}
+  </form>
+  <div class="note">Takes effect on the online funnel within ~30 seconds (config is cached briefly).
+    Only admins can change this.</div>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h3>Google Ads conversions export</h3>
+  <p>These files feed Google Ads the <b>real, captured margin</b> per booking (keyed on the
+     visitor's stored gclid), plus retractions for anything refunded or voided. Download and
+     upload them in <b>Google Ads → Goals → Conversions → Uploads</b>, or set up a scheduled
+     pull (below) so Google fetches them automatically.</p>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">
+    <a href="/admin/conversions.csv"><button class="b-on" type="button">⬇ Download conversions</button></a>
+    <a href="/admin/conversions-retractions.csv"><button class="b-off" type="button">⬇ Download retractions</button></a>
+  </div>
+  <div class="note">
+    <b>Hands-off option:</b> in Google Ads → Conversions → Uploads → <b>Schedules</b>, add an
+    <b>HTTPS</b> source on a daily/weekly cadence pointing at your export URLs (they need the
+    secret <code>CONVERSIONS_EXPORT_TOKEN</code> set as a config var):<br>
+    <code>/exports/conversions.csv?key=YOUR_TOKEN</code><br>
+    <code>/exports/retractions.csv?key=YOUR_TOKEN</code><br>
+    Google then imports on its own — no manual upload. The conversion action name must match
+    <code>CONVERSIONS_ACTION_NAME</code> (default “Confirmed booking”).
+  </div>
+</div></div>
+</body></html>
