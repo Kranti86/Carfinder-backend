@@ -22,7 +22,7 @@ import logging
 from ..config import get_settings
 from ..db import get_session
 from ..models_db import STATUS_FLOW, AuditLog, Reservation
-from ..services import conversions, email_service, payments, settings_service
+from ..services import audiences, conversions, email_service, payments, settings_service
 
 logger = logging.getLogger("carfinder.admin")
 
@@ -147,6 +147,48 @@ async def download_retractions(request: Request, session: AsyncSession = Depends
     name = get_settings().conversions_action_name or conversions.DEFAULT_CONVERSION_NAME
     text, _ = await conversions.retractions_csv(session, name)
     return _csv_response(text, "ads_conversion_retractions.csv")
+
+
+@router.get("/audience/{segment}.csv")
+async def download_audience(segment: str, request: Request,
+                            session: AsyncSession = Depends(get_session)):
+    """One-click Customer Match list (hashed) for Google Ads → Audience manager."""
+    agent = await agent_from_request(request, session)
+    if not agent:
+        return _login_redirect()
+    if segment not in audiences.SEGMENTS:
+        return HTMLResponse("Unknown segment", status_code=404)
+    text, _ = await audiences.audience_csv(session, segment)
+    return _csv_response(text, f"audience_{segment}.csv")
+
+
+@router.get("/exports", response_class=HTMLResponse)
+async def exports_page(request: Request, session: AsyncSession = Depends(get_session)):
+    """All data downloads in one place, with live counts per audience segment."""
+    agent = await agent_from_request(request, session)
+    if not agent:
+        return _login_redirect()
+    counts = {seg: len(await audiences.collect(session, seg)) for seg in audiences.SEGMENTS}
+    rows = "".join(
+        f'<tr><td><b>{seg}</b></td><td>{desc}</td><td style="text-align:right">{counts[seg]}</td>'
+        f'<td><a href="/admin/audience/{seg}.csv">Download CSV</a></td></tr>'
+        for seg, desc in audiences.SEGMENTS.items())
+    html = f"""<!doctype html><html><head><meta charset="utf-8"><title>Exports</title>
+<style>body{{font-family:system-ui,Segoe UI,Arial;margin:30px;color:#1e2633}}table{{border-collapse:collapse;margin:10px 0 24px}}
+td,th{{border-bottom:1px solid #e6ebf3;padding:9px 12px;text-align:left;font-size:14px}}a{{color:#1667c1}}
+.note{{background:#fff8e6;border:1px solid #f0d78a;border-radius:8px;padding:10px 12px;font-size:13px;max-width:820px}}</style></head>
+<body><p><a href="/admin/reservations">&larr; Reservations</a></p>
+<h2>Google Ads audiences (Customer Match)</h2>
+<p class="note">Hashed (SHA-256) email + phone, in Google's format. Upload in Google Ads &rarr; Tools &rarr;
+Audience manager &rarr; + &rarr; Customer list &rarr; <b>Upload hashed data</b>; refresh with
+<b>Replace all data</b>. Visitors who rejected cookies and test bookings are always left out.
+Google needs about 100 matched people before a list can be used.</p>
+<table><tr><th>Segment</th><th>Who</th><th>People</th><th></th></tr>{rows}</table>
+<h2>Google Ads offline conversions</h2>
+<p><a href="/admin/conversions.csv">Confirmed bookings CSV</a> &middot;
+<a href="/admin/conversions-retractions.csv">Retractions CSV</a>
+(also fetched automatically by the scheduled uploads)</p></body></html>"""
+    return HTMLResponse(html)
 
 
 # --------------------------------------------------------------------------- #

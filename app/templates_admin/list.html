@@ -30,6 +30,7 @@
 </style></head><body>
 <header><div>Therentalcars <b>Ops</b> · Reservations</div>
   <div>{{ agent.name or agent.email }}
+    · <a href="/admin/exports">Exports &amp; audiences</a>
     {% if agent.role == 'admin' %} · <a href="/admin/settings">Settings</a>{% endif %}
     · <a href="/admin/logout">Sign out</a></div></header>
 <div class="wrap">
