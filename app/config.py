@@ -79,6 +79,9 @@ class Settings(BaseSettings):
     # Brevo transactional API (HTTPS). Preferred over SMTP: Railway blocks outbound SMTP
     # on Free/Trial/Hobby plans. If set, emails go through the API, not SMTP.
     brevo_api_key: str = ""
+    # Admin login brute-force guard: max POST /admin/login per client per window
+    login_rate_limit: int = 10
+    login_rate_window: int = 900
     support_email: str = ""         # shown to customers for help
     brand_name: str = "Therentalcars"
     business_name: str = "Himalayan Haze LLC"

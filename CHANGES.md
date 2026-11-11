@@ -51,3 +51,9 @@
   capture window, disputes, and open/awaiting-confirmation counts. Test bookings excluded.
 - The Slack webhook URL is scrubbed from httpx request logs.
 - Env: `SLACK_WEBHOOK_URL` (web + cron), optional `ADMIN_BASE_URL` for links.
+
+## Audit fixes
+- Google Ads conversion uploads now skip bookings whose visitor clicked "Reject" on the
+  cookie banner (`ads_opt_out`), matching the audience exports and the cookie policy.
+- Admin login is rate-limited (10 attempts / 15 min per client; `LOGIN_RATE_LIMIT`,
+  `LOGIN_RATE_WINDOW`) to stop password guessing.

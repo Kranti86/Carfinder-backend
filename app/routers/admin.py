@@ -21,6 +21,7 @@ import logging
 
 from ..config import get_settings
 from ..db import get_session
+from ..rate_limit import check_rate_limit
 from ..models_db import STATUS_FLOW, AuditLog, Reservation
 from ..services import audiences, conversions, email_service, notify, payments, settings_service
 
@@ -69,6 +70,14 @@ async def login_page(request: Request):
 @router.post("/login")
 async def login_submit(request: Request, email: str = Form(...), password: str = Form(...),
                        session: AsyncSession = Depends(get_session)):
+    settings = get_settings()
+    if not await check_rate_limit(request, bucket="admin-login", limit=settings.login_rate_limit,
+                                  window=settings.login_rate_window):
+        logging.getLogger("carfinder.admin").warning("admin login rate-limited")
+        return templates.TemplateResponse(
+            request=request, name="login.html",
+            context={"error": "Too many attempts. Wait 15 minutes and try again."},
+            status_code=429)
     agent = await authenticate(session, email, password)
     if not agent:
         return templates.TemplateResponse(

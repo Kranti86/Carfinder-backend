@@ -140,3 +140,34 @@ def test_capture_run_summary(client, sent):
         authorized_at=datetime.now(timezone.utc) - timedelta(days=4))
     run(client, cli._capture_due)
     assert any("Auto-capture" in t and "captured" in t for t in sent)
+
+
+def test_admin_login_rate_limited(client):
+    from app.config import get_settings
+    s = get_settings()
+    old = s.login_rate_limit
+    s.login_rate_limit = 3
+    try:
+        codes = [client.post("/admin/login", data={"email": "x@y.z", "password": "bad"},
+                             follow_redirects=False).status_code for _ in range(5)]
+    finally:
+        s.login_rate_limit = old
+    assert codes[:3] == [401, 401, 401] and codes[3:] == [429, 429]
+
+
+def test_opted_out_booking_not_reported_to_ads(client):
+    import uuid
+    from app.db import session_factory
+    from app.models_db import Reservation
+    from app.services import conversions
+    g_ok, g_out = "GCLID-OK-" + uuid.uuid4().hex[:6], "GCLID-OUT-" + uuid.uuid4().hex[:6]
+
+    async def go():
+        async with session_factory()() as s:
+            for g, opt in ((g_ok, False), (g_out, True)):
+                s.add(Reservation(id=uuid.uuid4().hex, gclid=g, ads_opt_out=opt,
+                                  status="captured", payment_status="captured", service_fee=20))
+            await s.commit()
+            return (await conversions.conversions_csv(s))[0]
+    text = run(client, go)
+    assert g_ok in text and g_out not in text
