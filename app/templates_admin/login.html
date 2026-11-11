@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Therentalcars Ops — Sign in</title>
+<style>
+  body{font-family:system-ui,Segoe UI,Arial,sans-serif;background:#0b1d3a;color:#eaeef6;
+       display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}
+  .card{background:#12234a;padding:34px 30px;border-radius:14px;width:320px;
+        box-shadow:0 12px 40px rgba(0,0,0,.4);border:1px solid rgba(212,175,55,.3)}
+  h1{font-size:1.2rem;margin:0 0 4px;color:#d4af37}
+  p{margin:0 0 20px;font-size:.85rem;opacity:.8}
+  label{display:block;font-size:.78rem;margin:12px 0 4px;opacity:.85}
+  input{width:100%;padding:11px;border-radius:8px;border:1px solid #2b3d66;background:#0d1b38;
+        color:#fff;box-sizing:border-box}
+  button{width:100%;margin-top:20px;padding:12px;border:0;border-radius:8px;background:#12b886;
+         color:#fff;font-weight:700;cursor:pointer}
+  .err{background:#3a1620;border:1px solid #a33;color:#f7c6cf;padding:9px;border-radius:8px;
+       font-size:.8rem;margin-bottom:8px}
+</style></head><body>
+  <form class="card" method="post" action="/admin/login">
+    <h1>Therentalcars Ops</h1>
+    <p>Agent sign in</p>
+    {% if error %}<div class="err">{{ error }}</div>{% endif %}
+    <label>Email</label>
+    <input name="email" type="email" autocomplete="username" required autofocus>
+    <label>Password</label>
+    <input name="password" type="password" autocomplete="current-password" required>
+    <button type="submit">Sign in</button>
+  </form>
+</body></html>

@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ r.id[:8] }} — Reservation</title>
+<style>
+  :root{--navy:#0b1d3a;--gold:#d4af37;--green:#12b886}
+  body{font-family:system-ui,Segoe UI,Arial,sans-serif;margin:0;background:#f4f7fb;color:#1a2233}
+  header{background:var(--navy);color:#fff;padding:12px 20px;display:flex;justify-content:space-between}
+  header a{color:#cdd6e8;text-decoration:none;font-size:.85rem}
+  .wrap{max-width:980px;margin:22px auto;padding:0 16px;display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .card{background:#fff;border-radius:12px;padding:18px 20px;box-shadow:0 3px 12px rgba(0,0,0,.05)}
+  .card h3{margin:0 0 12px;font-size:.95rem;color:var(--navy);border-bottom:2px solid #eef2f8;padding-bottom:8px}
+  .kv{display:flex;justify-content:space-between;font-size:.85rem;padding:4px 0;border-bottom:1px dashed #eef2f8}
+  .kv span:first-child{color:#7a8298}
+  .full{grid-column:1/3}
+  .pill{padding:3px 9px;border-radius:12px;font-size:.72rem;font-weight:700;text-transform:capitalize}
+  .s-new{background:#eef1f7;color:#55627d}.s-authorized{background:#fff4d6;color:#8a6d00}
+  .s-confirmed{background:#e2f0ff;color:#1667c1}.s-captured{background:#defbe9;color:#0c7a45}
+  .s-fulfilled{background:#dcf5f0;color:#0a7a67}.s-cancelled{background:#fde3e3;color:#a12727}
+  .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+  .actions button{padding:9px 14px;border:0;border-radius:8px;font-weight:700;cursor:pointer;font-size:.82rem}
+  .b-cap{background:var(--green);color:#fff}.b-ref{background:#e8a33d;color:#3a2500}
+  .b-void{background:#c0413f;color:#fff}.b-ok{background:var(--navy);color:#fff}
+  .row{display:flex;gap:8px;margin-top:8px}
+  .row input{flex:1;padding:9px;border:1px solid #cfd8e8;border-radius:8px}
+  .row button{background:#33415c;color:#fff;border:0;border-radius:8px;padding:0 14px;cursor:pointer}
+  .warn{background:#fff8e6;border:1px solid #f0d78a;color:#7a5c00;font-size:.78rem;padding:8px 10px;border-radius:8px;margin-top:10px}
+  .timeline{font-size:.82rem}
+  .ev{padding:8px 0;border-bottom:1px solid #f0f3f8}
+  .ev b{color:var(--navy)}.ev .who{color:#8894ad}
+  a.back{color:#cdd6e8}
+  .steps{display:flex;flex-direction:column;gap:14px}
+  .step{border-left:3px solid #e3e9f3;padding:2px 0 2px 14px}
+  .step>b{display:block;font-size:.85rem;color:var(--navy);margin-bottom:6px}
+  .step input[type=file]{flex:1;font-size:.82rem}
+  .ok-line{color:#0c7a45;font-size:.83rem;margin-top:6px}
+  .ok-line a{color:#0c7a45}
+  .hint{color:#8894ad;font-size:.82rem;margin-top:4px}
+  .errbar{grid-column:1/3;background:#fde3e3;border:1px solid #e6a3a3;color:#a12727;padding:11px 14px;border-radius:10px;font-size:.86rem}
+</style></head><body>
+<header><div>Reservation <b style="color:var(--gold)">{{ r.id[:8] }}</b>
+    &nbsp;<span class="pill s-{{ r.status }}">{{ r.status }}</span></div>
+  <div><a href="/admin/reservations">← All</a> · {{ agent.email }} · <a href="/admin/logout">Sign out</a></div></header>
+<div class="wrap">
+{% if err %}<div class="errbar">{{ err }}</div>{% endif %}
+
+  <div class="card"><h3>Customer</h3>
+    <div class="kv"><span>Name</span><span>{{ r.customer_name or '—' }}</span></div>
+    <div class="kv"><span>Email</span><span>{{ r.customer_email or '—' }}</span></div>
+    <div class="kv"><span>Phone</span><span>{{ r.customer_phone or '—' }}</span></div>
+    <div class="kv"><span>Source</span><span>{{ r.source }}</span></div>
+    {% if r.gclid %}<div class="kv"><span>gclid</span><span>{{ r.gclid[:18] }}…</span></div>{% endif %}
+  </div>
+
+  <div class="card"><h3>Trip &amp; vehicle</h3>
+    <div class="kv"><span>City</span><span>{{ r.city or '—' }}</span></div>
+    <div class="kv"><span>Pickup area</span><span>{{ r.pickup_area or '—' }}</span></div>
+    <div class="kv"><span>Pickup</span><span>{{ r.pickup_datetime or '—' }}</span></div>
+    <div class="kv"><span>Drop-off</span><span>{{ r.dropoff_datetime or '—' }}</span></div>
+    <div class="kv"><span>Vehicle</span><span>{{ r.vehicle_name or '—' }} ({{ r.vehicle_type }})</span></div>
+    <div class="kv"><span>Supplier</span><span>{{ r.supplier or '—' }}</span></div>
+  </div>
+
+  <div class="card"><h3>Money</h3>
+    <div class="kv"><span>Rental (at counter)</span><span>${{ '%.2f'|format(r.base_price) }}</span></div>
+    <div class="kv"><span>Service fee</span><span>${{ '%.2f'|format(r.service_fee) }}</span></div>
+    <div class="kv"><span>Insurance (net {{ '%.2f'|format(r.insurance_net) }})</span><span>${{ '%.2f'|format(r.insurance_price) }}</span></div>
+    <div class="kv"><span><b>Pay-now (online)</b></span><span><b>${{ '%.2f'|format(r.pay_now_total) }}</b></span></div>
+    <div class="kv"><span>Authorized</span><span>${{ '%.2f'|format(r.amount_authorized) }}</span></div>
+    <div class="kv"><span>Captured</span><span>${{ '%.2f'|format(r.amount_captured) }}</span></div>
+    <div class="kv"><span>Payment status</span><span>{{ r.payment_status }}</span></div>
+    {% if not payments_live %}<div class="warn">PayPal not configured — payment buttons record intent only (no live charge) until you add credentials.</div>{% endif %}
+  </div>
+
+  <div class="card"><h3>Payment</h3>
+    <div class="actions">
+      <form method="post" action="/admin/reservations/{{ r.id }}/action"><input type="hidden" name="action" value="capture"><button class="b-cap">Capture</button></form>
+      <form method="post" action="/admin/reservations/{{ r.id }}/action"><input type="hidden" name="action" value="refund"><button class="b-ref">Refund</button></form>
+      <form method="post" action="/admin/reservations/{{ r.id }}/action"><input type="hidden" name="action" value="void"><button class="b-void">Void auth</button></form>
+    </div>
+    <div class="warn">On a full cancellation, refund/void here <b>and</b> clawback the rentalcover net + cancel the policy.</div>
+    <form class="row" method="post" action="/admin/reservations/{{ r.id }}/action" style="margin-top:10px"
+          onsubmit="return confirm('Cancel this reservation and email the customer?');">
+      <input type="hidden" name="action" value="cancel">
+      <input name="value" placeholder="Reason (optional, shown to customer)">
+      <button class="b-void">Cancel &amp; notify customer</button></form>
+  </div>
+
+  <div class="card full"><h3>Supplier confirmation &amp; fulfilment</h3>
+    <div class="steps">
+      <div class="step">
+        <b>1. Supplier confirmation number</b>
+        <form class="row" method="post" action="/admin/reservations/{{ r.id }}/action">
+          <input type="hidden" name="action" value="supplier_ref">
+          <input name="value" value="{{ r.supplier_reservation_number }}" placeholder="Supplier confirmation #">
+          <button>Save</button></form>
+      </div>
+      <div class="step">
+        <b>2. Attach the supplier confirmation (PDF)</b>
+        <form class="row" method="post" enctype="multipart/form-data" action="/admin/reservations/{{ r.id }}/upload">
+          <input type="file" name="file" accept="application/pdf,image/*" required>
+          <button>Upload</button></form>
+        {% if r.confirmation_doc_name %}<div class="ok-line">✓ Attached: <a href="/admin/reservations/{{ r.id }}/document" target="_blank">{{ r.confirmation_doc_name }}</a></div>{% endif %}
+      </div>
+      <div class="step">
+        <b>3. Insurance policy / certificate # (optional)</b>
+        <form class="row" method="post" action="/admin/reservations/{{ r.id }}/action">
+          <input type="hidden" name="action" value="policy">
+          <input name="value" value="{{ r.policy_number }}" placeholder="Policy / certificate #">
+          <button>Save</button></form>
+      </div>
+      <div class="step">
+        <b>4. Send final confirmation to the customer</b>
+        {% if r.confirmation_sent %}
+          <div class="ok-line">✓ Sent to {{ r.customer_email }}{% if r.confirmation_sent_at %} on {{ r.confirmation_sent_at.strftime('%b %d %Y %H:%M') }}{% endif %}</div>
+        {% elif r.supplier_reservation_number and r.confirmation_doc_name %}
+          <form method="post" action="/admin/reservations/{{ r.id }}/action"><input type="hidden" name="action" value="confirm_send"><button class="b-cap">Confirm &amp; email customer (with PDF)</button></form>
+        {% else %}
+          <div class="hint">Add the supplier confirmation number and attach the PDF first.</div>
+        {% endif %}
+      </div>
+      <div class="step">
+        <b>5. Mark fulfilled</b>
+        {% if r.confirmation_sent %}
+          <form method="post" action="/admin/reservations/{{ r.id }}/action"><input type="hidden" name="action" value="fulfill"><button class="b-ok">Mark fulfilled (sends review invite)</button></form>
+        {% else %}
+          <div class="hint">Locked until the final confirmation has been sent (step 4).</div>
+        {% endif %}
+      </div>
+    </div>
+    <form class="row" method="post" action="/admin/reservations/{{ r.id }}/action" style="margin-top:12px">
+      <input type="hidden" name="action" value="note">
+      <input name="value" placeholder="Add a note…"><button>Add</button></form>
+  </div>
+
+  <div class="card full"><h3>Audit trail</h3>
+    <div class="timeline">
+      {% for e in events %}
+        <div class="ev"><b>{{ e.action }}</b> — {{ e.detail }}
+          <div class="who">{{ e.agent_email }} · {{ e.created_at.strftime('%b %d %Y %H:%M') }}</div></div>
+      {% else %}<div class="ev">No events.</div>{% endfor %}
+    </div>
+  </div>
+
+</div>
+</body></html>

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reservations — Therentalcars Ops</title>
+<style>
+  :root{--navy:#0b1d3a;--gold:#d4af37;--green:#12b886}
+  body{font-family:system-ui,Segoe UI,Arial,sans-serif;margin:0;background:#f4f7fb;color:#1a2233}
+  header{background:var(--navy);color:#fff;padding:12px 20px;display:flex;align-items:center;
+         justify-content:space-between}
+  header b{color:var(--gold)}
+  header a{color:#cdd6e8;text-decoration:none;font-size:.85rem}
+  .wrap{max-width:1180px;margin:22px auto;padding:0 16px}
+  .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+  .tabs a{padding:7px 13px;border-radius:20px;background:#fff;border:1px solid #dbe3f0;
+          text-decoration:none;color:#33415c;font-size:.82rem}
+  .tabs a.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+  form.search{margin-bottom:14px}
+  form.search input{padding:9px 12px;border:1px solid #cfd8e8;border-radius:8px;width:280px}
+  table{width:100%;border-collapse:collapse;background:#fff;border-radius:10px;overflow:hidden;
+        box-shadow:0 3px 12px rgba(0,0,0,.05)}
+  th,td{text-align:left;padding:11px 12px;font-size:.85rem;border-bottom:1px solid #eef2f8}
+  th{background:#f0f4fa;color:#55627d;font-size:.72rem;text-transform:uppercase;letter-spacing:.4px}
+  tr:hover td{background:#fafcff}
+  a.rid{font-family:ui-monospace,monospace;color:var(--navy);text-decoration:none;font-weight:600}
+  .pill{padding:3px 9px;border-radius:12px;font-size:.72rem;font-weight:700;text-transform:capitalize}
+  .s-new{background:#eef1f7;color:#55627d}.s-authorized{background:#fff4d6;color:#8a6d00}
+  .s-confirmed{background:#e2f0ff;color:#1667c1}.s-captured{background:#defbe9;color:#0c7a45}
+  .s-fulfilled{background:#dcf5f0;color:#0a7a67}.s-cancelled{background:#fde3e3;color:#a12727}
+  .empty{padding:40px;text-align:center;color:#8894ad}
+</style></head><body>
+<header><div>Therentalcars <b>Ops</b> · Reservations</div>
+  <div>{{ agent.name or agent.email }}
+    {% if agent.role == 'admin' %} · <a href="/admin/settings">Settings</a>{% endif %}
+    · <a href="/admin/logout">Sign out</a></div></header>
+<div class="wrap">
+  <div class="tabs">
+    <a href="/admin/reservations" class="{{ '' if active_status else 'on' }}">All</a>
+    {% for s in statuses %}
+      <a href="/admin/reservations?status={{ s }}" class="{{ 'on' if active_status==s else '' }}">
+        {{ s }} <b>{{ counts[s] }}</b></a>
+    {% endfor %}
+  </div>
+  <form class="search" method="get" action="/admin/reservations">
+    {% if active_status %}<input type="hidden" name="status" value="{{ active_status }}">{% endif %}
+    <input name="q" value="{{ q }}" placeholder="Search name, email, city, id…">
+  </form>
+  <table>
+    <tr><th>Created</th><th>ID</th><th>Customer</th><th>Trip</th><th>Vehicle</th>
+        <th>Pay-now</th><th>Payment</th><th>Status</th></tr>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r.created_at.strftime('%b %d %H:%M') }}</td>
+      <td><a class="rid" href="/admin/reservations/{{ r.id }}">{{ r.id[:8] }}</a></td>
+      <td>{{ r.customer_name or '—' }}<br><span style="color:#8894ad">{{ r.customer_email }}</span></td>
+      <td>{{ r.city or '—' }}<br><span style="color:#8894ad">{{ r.pickup_datetime }}</span></td>
+      <td>{{ r.vehicle_name or '—' }}<br><span style="color:#8894ad">{{ r.supplier }}</span></td>
+      <td>${{ '%.2f'|format(r.pay_now_total) }}</td>
+      <td>{{ r.payment_status }}</td>
+      <td><span class="pill s-{{ r.status }}">{{ r.status }}</span></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="8" class="empty">No reservations yet.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+</body></html>
