@@ -1,0 +1,21 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+httpx==0.28.1
+redis==5.2.1
+pydantic==2.10.4
+pydantic-settings==2.7.1
+python-dotenv==1.0.1
+
+# Phase 2 — reservations, ops portal, payments
+sqlalchemy==2.0.36
+asyncpg==0.30.0          # Postgres (Heroku) async driver
+greenlet==3.1.1          # required by SQLAlchemy async (not auto-installed on every Python)
+aiosqlite==0.20.0        # sqlite fallback for local/dev/tests
+bcrypt==4.2.1            # agent password hashing
+itsdangerous==2.2.0      # signed session cookies
+jinja2==3.1.4            # server-rendered portal templates
+python-multipart==0.0.20 # form posts (login, actions)
+
+# dev/test
+pytest==8.3.4
+pytest-asyncio==0.25.0

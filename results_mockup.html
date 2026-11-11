@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CarFinder — results preview</title>
+<style>
+  :root{
+    --bg:#f4f5f7; --card:#ffffff; --ink:#101828; --muted:#667085;
+    --line:#e4e7ec; --accent:#4f46e5; --accent-soft:#eef2ff;
+    --good:#067647; --good-soft:#ecfdf3; --price:#101828; --amber:#b54708; --amber-soft:#fffaeb;
+    --shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.10);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);width:440px}
+  .app{padding:0 0 28px}
+  /* header */
+  header{background:var(--card);padding:16px 18px 14px;border-bottom:1px solid var(--line);position:sticky;top:0}
+  .route{font-size:19px;font-weight:700;letter-spacing:-.01em}
+  .dates{margin-top:3px;font-size:13.5px;color:var(--muted)}
+  .meta{margin-top:10px;display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted)}
+  .dot{width:3px;height:3px;border-radius:50%;background:#cbd2dc}
+  .fresh{display:inline-flex;align-items:center;gap:5px}
+  .fresh::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--good)}
+  /* sort chips */
+  .chips{display:flex;gap:8px;padding:12px 18px 4px;overflow-x:auto}
+  .chip{white-space:nowrap;font-size:13px;font-weight:600;padding:7px 13px;border-radius:999px;border:1px solid var(--line);background:#fff;color:var(--muted)}
+  .chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  /* card */
+  .list{padding:12px 14px 0;display:flex;flex-direction:column;gap:12px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:14px;position:relative}
+  .best{position:absolute;top:-9px;left:14px;background:var(--accent);color:#fff;font-size:11px;font-weight:700;letter-spacing:.02em;padding:3px 9px;border-radius:999px;box-shadow:var(--shadow)}
+  .top{display:flex;gap:12px}
+  .thumb{width:96px;height:64px;border-radius:10px;background:linear-gradient(135deg,#f2f4f7,#e7ebf1);flex:0 0 auto;display:flex;align-items:center;justify-content:center}
+  .thumb svg{width:74px;height:44px}
+  .info{flex:1;min-width:0}
+  .name{font-size:15.5px;font-weight:700;line-height:1.15}
+  .klass{font-size:12px;color:var(--muted);margin-top:2px}
+  .specs{margin-top:7px;display:flex;flex-wrap:wrap;gap:6px}
+  .spec{font-size:11.5px;color:#344054;background:#f2f4f7;border-radius:6px;padding:3px 7px}
+  .price{position:absolute;top:14px;right:14px;text-align:right}
+  .amt{font-size:22px;font-weight:800;letter-spacing:-.02em;color:var(--price)}
+  .was{font-size:12px;color:var(--muted);text-decoration:line-through}
+  .per{font-size:11px;color:var(--muted)}
+  .row2{margin-top:12px;padding-top:11px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between}
+  .supplier{display:flex;align-items:center;gap:8px}
+  .slogo{width:26px;height:26px;border-radius:6px;background:#101828;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  .sname{font-size:13px;font-weight:600}
+  .rating{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);margin-top:1px}
+  .score{background:var(--good-soft);color:var(--good);font-weight:700;font-size:11.5px;padding:1px 6px;border-radius:5px}
+  .loc{font-size:12px;color:var(--muted);text-align:right;max-width:150px}
+  .loc b{color:#344054;font-weight:600}
+  .badges{margin-top:11px;display:flex;flex-wrap:wrap;gap:6px}
+  .badge{font-size:11px;font-weight:600;padding:3px 8px;border-radius:6px}
+  .b-free{background:var(--good-soft);color:var(--good)}
+  .b-pay{background:var(--amber-soft);color:var(--amber)}
+  .cta{margin-top:12px;width:100%;background:var(--accent);color:#fff;border:0;border-radius:10px;padding:11px;font-size:14px;font-weight:700}
+  .foot{margin-top:14px;text-align:center;font-size:11.5px;color:#98a2b3}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="route">Cars in New York, NY</div>
+    <div class="dates">Tue, Sep 1 · 10:00 → Fri, Sep 4 · 10:00 &nbsp;·&nbsp; 3 days</div>
+    <div class="meta"><span class="fresh">Prices as of just now</span><span class="dot"></span><span>2,515 results</span></div>
+  </header>
+
+  <div class="chips">
+    <div class="chip on">Cheapest first</div>
+    <div class="chip">Closest</div>
+    <div class="chip">Best per type</div>
+  </div>
+
+  <div class="list">
+    <!-- CARD 1 -->
+    <div class="card">
+      <div class="best">Best Full-size</div>
+      <div class="price"><div class="amt">$54</div><div class="was">$60</div><div class="per">for 3 days</div></div>
+      <div class="top">
+        <div class="thumb">
+          <svg viewBox="0 0 100 56" fill="none"><path d="M8 40c0-3 2-5 5-5h74c3 0 5 2 5 5v3H8v-3z" fill="#c7cdd8"/><path d="M20 35l8-13c1-2 3-3 5-3h24c2 0 4 1 5 3l8 13H20z" fill="#aab2c0"/><circle cx="28" cy="43" r="7" fill="#475467"/><circle cx="72" cy="43" r="7" fill="#475467"/><circle cx="28" cy="43" r="3" fill="#cbd2dc"/><circle cx="72" cy="43" r="3" fill="#cbd2dc"/></svg>
+        </div>
+        <div class="info">
+          <div class="name">Toyota Corolla</div>
+          <div class="klass">Full-size · or similar</div>
+          <div class="specs"><span class="spec">5 seats</span><span class="spec">Automatic</span><span class="spec">Unlimited miles</span></div>
+        </div>
+      </div>
+      <div class="row2">
+        <div class="supplier"><div class="slogo">AV</div><div><div class="sname">Avis</div><div class="rating"><span class="score">8.9</span> Fabulous · 10 reviews</div></div></div>
+        <div class="loc"><b>Jersey City</b><br>Downtown · 7.5 km</div>
+      </div>
+      <div class="badges"><span class="badge b-free">Free cancellation</span><span class="badge b-pay">Pay at pick-up</span></div>
+    </div>
+
+    <!-- CARD 2 -->
+    <div class="card">
+      <div class="best">Best Compact</div>
+      <div class="price"><div class="amt">$55</div><div class="per">for 3 days</div></div>
+      <div class="top">
+        <div class="thumb">
+          <svg viewBox="0 0 100 56" fill="none"><path d="M10 40c0-3 2-5 5-5h70c3 0 5 2 5 5v3H10v-3z" fill="#c7cdd8"/><path d="M22 35l7-12c1-2 3-3 5-3h22c2 0 4 1 5 3l7 12H22z" fill="#aab2c0"/><circle cx="30" cy="43" r="7" fill="#475467"/><circle cx="70" cy="43" r="7" fill="#475467"/><circle cx="30" cy="43" r="3" fill="#cbd2dc"/><circle cx="70" cy="43" r="3" fill="#cbd2dc"/></svg>
+        </div>
+        <div class="info">
+          <div class="name">Kia Rio</div>
+          <div class="klass">Compact · or similar</div>
+          <div class="specs"><span class="spec">5 seats</span><span class="spec">Automatic</span><span class="spec">Unlimited miles</span></div>
+        </div>
+      </div>
+      <div class="row2">
+        <div class="supplier"><div class="slogo">BU</div><div><div class="sname">Budget</div><div class="rating"><span class="score">9.8</span> Exceptional · 5 reviews</div></div></div>
+        <div class="loc"><b>New Rochelle</b><br>Train Station · 23 km</div>
+      </div>
+      <div class="badges"><span class="badge b-free">Free cancellation</span><span class="badge b-pay">Pay at pick-up</span></div>
+    </div>
+
+    <!-- CARD 3 -->
+    <div class="card">
+      <div class="best">Best SUV</div>
+      <div class="price"><div class="amt">$61</div><div class="was">$67</div><div class="per">for 3 days</div></div>
+      <div class="top">
+        <div class="thumb">
+          <svg viewBox="0 0 100 56" fill="none"><path d="M8 41c0-3 2-5 5-5h74c3 0 5 2 5 5v2H8v-2z" fill="#c7cdd8"/><path d="M16 36l6-15c1-2 3-4 5-4h36c2 0 4 2 5 4l6 15H16z" fill="#aab2c0"/><circle cx="28" cy="43" r="8" fill="#475467"/><circle cx="72" cy="43" r="8" fill="#475467"/><circle cx="28" cy="43" r="3.5" fill="#cbd2dc"/><circle cx="72" cy="43" r="3.5" fill="#cbd2dc"/></svg>
+        </div>
+        <div class="info">
+          <div class="name">Toyota RAV4</div>
+          <div class="klass">SUV · or similar</div>
+          <div class="specs"><span class="spec">5 seats</span><span class="spec">Automatic</span><span class="spec">Unlimited miles</span></div>
+        </div>
+      </div>
+      <div class="row2">
+        <div class="supplier"><div class="slogo">AV</div><div><div class="sname">Avis</div><div class="rating"><span class="score">8.9</span> Fabulous · 10 reviews</div></div></div>
+        <div class="loc"><b>Jersey City</b><br>Downtown · 7.5 km</div>
+      </div>
+      <div class="badges"><span class="badge b-free">Free cancellation</span><span class="badge b-pay">Pay at pick-up</span></div>
+    </div>
+
+    <!-- CARD 4 -->
+    <div class="card">
+      <div class="best">Best Minivan</div>
+      <div class="price"><div class="amt">$80</div><div class="per">for 3 days</div></div>
+      <div class="top">
+        <div class="thumb">
+          <svg viewBox="0 0 100 56" fill="none"><path d="M8 41c0-3 2-5 5-5h74c3 0 5 2 5 5v2H8v-2z" fill="#c7cdd8"/><path d="M16 36l4-16c.5-2 2-4 5-4h40c2 0 4 2 5 4l5 16H16z" fill="#aab2c0"/><circle cx="28" cy="43" r="7.5" fill="#475467"/><circle cx="72" cy="43" r="7.5" fill="#475467"/><circle cx="28" cy="43" r="3.3" fill="#cbd2dc"/><circle cx="72" cy="43" r="3.3" fill="#cbd2dc"/></svg>
+        </div>
+        <div class="info">
+          <div class="name">Chrysler Pacifica</div>
+          <div class="klass">Minivan · or similar</div>
+          <div class="specs"><span class="spec">7 seats</span><span class="spec">Automatic</span><span class="spec">Unlimited miles</span></div>
+        </div>
+      </div>
+      <div class="row2">
+        <div class="supplier"><div class="slogo">EN</div><div><div class="sname">Enterprise</div><div class="rating"><span class="score">9.4</span> Superb · 8 reviews</div></div></div>
+        <div class="loc"><b>Fairview</b><br>Bergen Blvd · 12 km</div>
+      </div>
+      <div class="badges"><span class="badge b-free">Free cancellation</span></div>
+    </div>
+  </div>
+
+  <div class="foot">Showing 4 of 2,515 · ranked cheapest → closest</div>
+</div>
+</body>
+</html>
