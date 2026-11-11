@@ -22,7 +22,7 @@ import logging
 from ..config import get_settings
 from ..db import get_session
 from ..models_db import STATUS_FLOW, AuditLog, Reservation
-from ..services import audiences, conversions, email_service, payments, settings_service
+from ..services import audiences, conversions, email_service, notify, payments, settings_service
 
 logger = logging.getLogger("carfinder.admin")
 
@@ -263,6 +263,8 @@ async def upload_document(request: Request, rid: str, file: UploadFile = File(..
     r.confirmation_doc_name = (file.filename or "confirmation.pdf")[:200]
     await _log(session, r, agent, "upload_doc", r.confirmation_doc_name)
     await session.commit()
+    if alert:
+        await notify.payment_event(r, *alert)
     return RedirectResponse(f"/admin/reservations/{rid}", status_code=303)
 
 
@@ -292,6 +294,9 @@ async def reservation_action(request: Request, rid: str, background: BackgroundT
     if not r:
         return HTMLResponse("Reservation not found", status_code=404)
 
+    alert: tuple[str, str] | None = None
+    who = agent.name or agent.email
+
     if action == "capture":
         res = await payments.capture(r.payment_ref, r.amount_authorized or r.pay_now_total)
         if res.ok:
@@ -301,8 +306,10 @@ async def reservation_action(request: Request, rid: str, background: BackgroundT
             r.status = "captured"
             await _log(session, r, agent, "capture",
                        f"${r.amount_captured:.2f} {'(live)' if res.live else '(recorded)'}")
+            alert = ("captured", f"${r.amount_captured:.2f} by {who}")
         else:
             await _log(session, r, agent, "capture_failed", res.message)
+            alert = ("capture_failed", res.message)
 
     elif action == "refund":
         if r.payment_status != "captured" or not r.capture_ref:
@@ -313,8 +320,10 @@ async def reservation_action(request: Request, rid: str, background: BackgroundT
             r.status = "cancelled"
             await _log(session, r, agent, "refund",
                        "refunded; REMEMBER: clawback rentalcover net if fully cancelled")
+            alert = ("refunded", f"by {who}")
         else:
             await _log(session, r, agent, "refund_failed", res.message)
+            alert = ("refund_failed", res.message)
 
     elif action == "void":
         if r.payment_status not in ("authorized", "pending") or not r.payment_ref:
@@ -323,8 +332,10 @@ async def reservation_action(request: Request, rid: str, background: BackgroundT
             r.status = "cancelled"
             await _log(session, r, agent, "cancel",
                        "clawback rentalcover net if policy issued")
+            alert = ("cancelled", f"hold released by {who}")
         else:
             await session.commit()
+            await notify.payment_event(r, "void_failed", f"tried by {who}")
             return RedirectResponse(f"/admin/reservations/{rid}?err=void_failed", status_code=303)
 
     elif action == "cancel":
@@ -334,6 +345,7 @@ async def reservation_action(request: Request, rid: str, background: BackgroundT
             # Release the hold now, so the daily auto-capture can never charge it.
             if not await _release_hold(session, r, agent):
                 await session.commit()
+                await notify.payment_event(r, "void_failed", f"cancel tried by {who}")
                 return RedirectResponse(f"/admin/reservations/{rid}?err=void_failed",
                                         status_code=303)
             payment_note = "card hold released. "
@@ -343,6 +355,7 @@ async def reservation_action(request: Request, rid: str, background: BackgroundT
         await _log(session, r, agent, "cancel",
                    (f"reason: {reason}; " if reason else "") + payment_note +
                    "customer emailed. Remember to clawback insurance if a policy was issued.")
+        alert = ("cancelled", f"by {who}" + (f" — {reason}" if reason else ""))
         background.add_task(email_service.send_cancellation, {
             "ref": r.id[:8], "customer_name": r.customer_name,
             "customer_email": r.customer_email, "vehicle_name": r.vehicle_name,
@@ -358,6 +371,7 @@ async def reservation_action(request: Request, rid: str, background: BackgroundT
         r.status = "confirmed"
         await _log(session, r, agent, "final_confirmation_sent",
                    f"supplier #{r.supplier_reservation_number}, doc {r.confirmation_doc_name}")
+        alert = ("confirmed", f"by {who}")
         background.add_task(email_service.send_final_confirmation, {
             "ref": r.id[:8], "customer_name": r.customer_name, "customer_email": r.customer_email,
             "supplier_reservation_number": r.supplier_reservation_number,
@@ -373,6 +387,7 @@ async def reservation_action(request: Request, rid: str, background: BackgroundT
             return RedirectResponse(f"/admin/reservations/{rid}?err=confirm_first", status_code=303)
         r.status = "fulfilled"
         await _log(session, r, agent, "fulfill", "marked fulfilled + review invite sent")
+        alert = ("fulfilled", f"by {who}")
         background.add_task(email_service.send_review_invite, {
             "customer_name": r.customer_name, "customer_email": r.customer_email,
             "vehicle_name": r.vehicle_name, "city": r.city, "ref": r.id[:8]})
@@ -389,4 +404,6 @@ async def reservation_action(request: Request, rid: str, background: BackgroundT
         await _log(session, r, agent, "note", value.strip())
 
     await session.commit()
+    if alert:
+        await notify.payment_event(r, *alert)
     return RedirectResponse(f"/admin/reservations/{rid}", status_code=303)

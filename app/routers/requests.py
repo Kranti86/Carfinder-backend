@@ -32,7 +32,7 @@ from ..db import get_session
 from ..guard import is_verified
 from ..models_db import AuditLog, Reservation
 from ..rate_limit import check_rate_limit
-from ..services import email_service, payments, quotes, settings_service
+from ..services import email_service, payments, quotes, settings_service, notify
 
 logger = logging.getLogger("carfinder.requests")
 router = APIRouter(tags=["reservations"])
@@ -61,18 +61,6 @@ async def _body(request: Request) -> dict:
     except Exception:  # noqa: BLE001
         return {}
     return data if isinstance(data, dict) else {}
-
-
-async def _notify_slack(text: str) -> None:
-    url = os.environ.get("SLACK_WEBHOOK_URL")
-    if not url:
-        return
-    try:
-        import httpx
-        async with httpx.AsyncClient(timeout=8) as c:
-            await c.post(url, json={"text": text})
-    except Exception as exc:  # never let a notification failure break a booking
-        logger.warning("slack notify failed: %s", exc)
 
 
 def _clean_customer(raw) -> dict | None:
@@ -315,10 +303,7 @@ async def create_request(request: Request, background: BackgroundTasks,
 
     await session.commit()
 
-    await _notify_slack(
-        f":car: New reservation {r.id[:8]} — {r.customer_name or 'guest'} · "
-        f"{r.vehicle_name or '?'} in {r.city or '?'} · pay-now ${amount:.2f} · "
-        f"{r.status}/{r.payment_status}")
+    await notify.new_reservation(r, amount)
 
     data = _reservation_public(r)
     background.add_task(email_service.send_confirmation, data)

@@ -2,6 +2,8 @@
 
   python -m app.cli create-agent <email> <password> [name] [role]
   python -m app.cli capture-due            # capture holds older than 3 days
+  python -m app.cli daily-digest           # post the daily summary to Slack
+  python -m app.cli daily                  # capture-due, then daily-digest (cron)
   python -m app.cli purge-reservations     # DELETE all reservations + audit logs
   python -m app.cli init-db                # create tables
   python -m app.cli export-conversions [conversion_name]
@@ -21,7 +23,7 @@ from sqlalchemy import delete, select
 from .auth import hash_password
 from .db import init_db, session_factory
 from .models_db import Agent, AuditLog, Reservation
-from .services import conversions, payments
+from .services import conversions, notify, payments
 
 CAPTURE_AFTER_DAYS = 3
 
@@ -53,6 +55,7 @@ async def _capture_due():
             Reservation.authorized_at.is_not(None),
             Reservation.authorized_at <= cutoff))).scalars().all()
         print(f"{len(rows)} reservation(s) due for capture")
+        captured, failed = [], []
         for r in rows:
             res = await payments.capture(r.payment_ref, r.amount_authorized or r.pay_now_total)
             if res.ok:
@@ -64,10 +67,20 @@ async def _capture_due():
                                action="auto_capture",
                                detail=f"${r.amount_captured:.2f} after {CAPTURE_AFTER_DAYS}d"))
                 print(f"  captured {r.id[:8]} ${r.amount_captured:.2f}")
+                captured.append(r)
             else:
+                failed.append(r)
                 s.add(AuditLog(reservation_id=r.id, agent_email="scheduler",
                                action="auto_capture_failed", detail=res.message))
         await s.commit()
+    await notify.capture_run(captured, failed)
+
+
+async def _daily_digest():
+    await init_db()
+    async with session_factory()() as s:
+        text = await notify.send_digest(s)
+    print(text if notify.enabled() else "SLACK_WEBHOOK_URL not set — digest not sent:\n" + text)
 
 
 async def _export_conversions(conversion_name: str = DEFAULT_CONVERSION_NAME):
@@ -123,6 +136,13 @@ def main():
                                   args[4] if len(args) > 4 else "agent"))
     elif cmd == "capture-due":
         asyncio.run(_capture_due())
+    elif cmd == "daily-digest":
+        asyncio.run(_daily_digest())
+    elif cmd == "daily":
+        async def both():
+            await _capture_due()
+            await _daily_digest()
+        asyncio.run(both())
     elif cmd == "init-db":
         asyncio.run(init_db())
         print("tables ready")
