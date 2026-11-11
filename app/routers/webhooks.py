@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
 from ..models_db import AuditLog, Reservation
-from ..services import payments
+from ..services import payments, notify
 
 logger = logging.getLogger("carfinder.webhooks")
 router = APIRouter(tags=["webhooks"])
@@ -83,6 +83,9 @@ async def paypal_webhook(request: Request, session: AsyncSession = Depends(get_s
         logger.info("webhook %s: no matching reservation", etype)
         return {"ok": True, "matched": False}
 
+    prev_ps = r.payment_status
+    alert: tuple[str, str] | None = None
+
     def log(action, detail=""):
         session.add(AuditLog(reservation_id=r.id, agent_email="paypal-webhook",
                              action=action, detail=detail))
@@ -95,12 +98,16 @@ async def paypal_webhook(request: Request, session: AsyncSession = Depends(get_s
             r.payment_ref = resource.get("id", r.payment_ref)
             if r.status == "new":
                 r.status = "authorized"
+            if prev_ps in ("pending", "failed"):
+                alert = ("approved", "")
         log("wh_authorized", resource.get("id", ""))
 
     elif etype == "PAYMENT.AUTHORIZATION.VOIDED":
         r.payment_status = "voided"
         r.status = "cancelled"
         log("wh_voided", "authorization voided by PayPal (expired or manual)")
+        if prev_ps != "voided":
+            alert = ("voided", "by PayPal")
 
     elif etype == "PAYMENT.CAPTURE.COMPLETED":
         r.payment_status = "captured"
@@ -113,25 +120,41 @@ async def paypal_webhook(request: Request, session: AsyncSession = Depends(get_s
             except ValueError:
                 pass
         log("wh_capture_completed", f"capture {resource.get('id','')}")
+        if prev_ps != "captured":
+            alert = ("captured", money_of(resource))
 
     elif etype == "PAYMENT.CAPTURE.PENDING":
         r.payment_status = "pending"
         log("wh_capture_pending", "capture under review")
+        if prev_ps != "pending":
+            alert = ("capture_pending", "")
 
     elif etype == "PAYMENT.CAPTURE.DENIED":
         r.payment_status = "failed"
         log("wh_capture_denied", "capture denied by PayPal")
+        alert = ("capture_denied", "")
 
     elif etype in ("PAYMENT.CAPTURE.REFUNDED", "PAYMENT.CAPTURE.REVERSED"):
         r.payment_status = "refunded"
         r.status = "cancelled"
         log("wh_refunded", "refund/reversal — clawback rentalcover net if applicable")
+        if prev_ps != "refunded":
+            alert = ("refunded", "reversal/chargeback" if etype.endswith("REVERSED") else "via PayPal")
 
     elif etype.startswith("CUSTOMER.DISPUTE"):
         log("wh_dispute", f"{etype} — {resource.get('dispute_id','')}: review in PayPal")
+        if etype == "CUSTOMER.DISPUTE.CREATED":
+            alert = ("dispute", resource.get("reason", "") or "")
 
     else:
         log("wh_ignored", etype)
 
     await session.commit()
+    if alert:
+        await notify.payment_event(r, *alert)
     return {"ok": True, "matched": True, "event": etype}
+
+
+def money_of(resource: dict) -> str:
+    amt = (resource.get("amount") or {}).get("value")
+    return f"${amt}" if amt else ""

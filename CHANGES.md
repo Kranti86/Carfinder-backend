@@ -37,3 +37,17 @@
 - New segments: `high-value` (top 20% by lifetime booking value; optional
   `HIGH_VALUE_MIN_USD` floor), `recent-customers` (90 days), `lapsed-customers`
   (180+ days, win-back), `unconverted` (reserved but never paid).
+
+## Slack: instant alerts + daily digest
+- `app/services/notify.py`: one place for Slack. New-booking alert now says whether the
+  hold was approved, declined (with the phone to call), in review, or unpaid.
+- Alerts for: PayPal approving a held-for-review card, hold voided/expired, capture
+  (manual or PayPal), capture denied/failed, refunds/chargebacks, disputes, cancellations,
+  failed hold releases, final confirmation sent, fulfilled, and each auto-capture run.
+  PayPal echoes of actions we already alerted on are not repeated.
+- `python -m app.cli daily` = auto-capture + daily digest (run by the cron): last-24h
+  bookings and money, untouched bookings (no agent action yet), pickups within 48h without
+  a final confirmation, declined cards to call back, holds stuck in review or past the
+  capture window, disputes, and open/awaiting-confirmation counts. Test bookings excluded.
+- The Slack webhook URL is scrubbed from httpx request logs.
+- Env: `SLACK_WEBHOOK_URL` (web + cron), optional `ADMIN_BASE_URL` for links.
