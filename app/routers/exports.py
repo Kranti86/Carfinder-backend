@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
 from ..db import get_session
-from ..services import conversions
+from ..services import audiences, conversions
 
 router = APIRouter(tags=["exports"], prefix="/exports")
 
@@ -53,3 +53,15 @@ async def retractions_feed(key: str = Query(""), session: AsyncSession = Depends
     text, _ = await conversions.retractions_csv(session, _name())
     return PlainTextResponse(text, media_type="text/csv",
                              headers={"Content-Disposition": 'attachment; filename="ads_conversion_retractions.csv"'})
+
+
+@router.get("/audience/{segment}.csv", response_class=PlainTextResponse)
+async def audience_feed(segment: str, key: str = Query(""),
+                        session: AsyncSession = Depends(get_session)):
+    """Google Ads Customer Match list (hashed Email + Phone) for one segment."""
+    _check(key)
+    if segment not in audiences.SEGMENTS:
+        raise HTTPException(status_code=404, detail="Unknown segment")
+    text, _ = await audiences.audience_csv(session, segment)
+    return PlainTextResponse(text, media_type="text/csv", headers={
+        "Content-Disposition": f'attachment; filename="audience_{segment}.csv"'})

@@ -94,6 +94,8 @@ class Reservation(Base):
 
     # attribution
     gclid: Mapped[str] = mapped_column(String(255), default="")
+    # Visitor clicked "Reject" on the cookie banner → never put them in ad audiences.
+    ads_opt_out: Mapped[bool] = mapped_column(Boolean, default=False)
     utm_campaign: Mapped[str] = mapped_column(String(255), default="")
 
     events: Mapped[list["AuditLog"]] = relationship(
