@@ -46,8 +46,8 @@ async def collect(session, conversion_name: str = DEFAULT_CONVERSION_NAME):
     won, retracted = [], []
     now = _gads_time(datetime.now(timezone.utc))
     for r in rows:
-        if not r.gclid:
-            continue
+        if not r.gclid or r.ads_opt_out:
+            continue   # visitor clicked "Reject" on the cookie banner: never report to Ads
         is_captured = (r.payment_status == "captured") or (r.status in ("captured", "fulfilled"))
         is_reversed = r.payment_status in ("refunded", "voided") or r.status == "cancelled"
         ctime = _gads_time(r.created_at)
