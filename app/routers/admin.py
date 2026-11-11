@@ -34,6 +34,24 @@ def _login_redirect() -> RedirectResponse:
     return RedirectResponse("/admin/login", status_code=303)
 
 
+async def _release_hold(session, r, agent) -> bool:
+    """Void the card hold. If PayPal refuses because nothing is held any more (the hold
+    was DENIED, already VOIDED or EXPIRED), treat it as released. Returns True when no
+    money is held afterwards."""
+    res = await payments.void(r.payment_ref)
+    if res.ok:
+        r.payment_status = "voided"
+        await _log(session, r, agent, "void", f"card hold released {'(live)' if res.live else '(recorded)'}")
+        return True
+    status = await payments.authorization_status(r.payment_ref)
+    if status in payments.RELEASED_STATUSES:
+        r.payment_status = "voided" if status in ("VOIDED", "EXPIRED") else "failed"
+        await _log(session, r, agent, "void", f"nothing held: PayPal reports {status}")
+        return True
+    await _log(session, r, agent, "void_failed", res.message)
+    return False
+
+
 async def _log(session, r, agent, action, detail=""):
     session.add(AuditLog(reservation_id=r.id, agent_id=getattr(agent, "id", None),
                          agent_email=getattr(agent, "email", "system"),
@@ -257,31 +275,26 @@ async def reservation_action(request: Request, rid: str, background: BackgroundT
             await _log(session, r, agent, "refund_failed", res.message)
 
     elif action == "void":
-        if r.payment_status != "authorized" or not r.payment_ref:
+        if r.payment_status not in ("authorized", "pending") or not r.payment_ref:
             return RedirectResponse(f"/admin/reservations/{rid}?err=no_hold", status_code=303)
-        res = await payments.void(r.payment_ref)
-        if res.ok:
-            r.payment_status = "voided"
+        if await _release_hold(session, r, agent):
             r.status = "cancelled"
-            await _log(session, r, agent, "void",
-                       "auth voided; clawback rentalcover net if policy issued")
+            await _log(session, r, agent, "cancel",
+                       "clawback rentalcover net if policy issued")
         else:
-            await _log(session, r, agent, "void_failed", res.message)
+            await session.commit()
+            return RedirectResponse(f"/admin/reservations/{rid}?err=void_failed", status_code=303)
 
     elif action == "cancel":
         reason = value.strip()
         payment_note = ""
-        if r.payment_status == "authorized" and r.payment_ref:
+        if r.payment_status in ("authorized", "pending") and r.payment_ref:
             # Release the hold now, so the daily auto-capture can never charge it.
-            res = await payments.void(r.payment_ref)
-            if not res.ok:
-                await _log(session, r, agent, "void_failed", res.message)
+            if not await _release_hold(session, r, agent):
                 await session.commit()
                 return RedirectResponse(f"/admin/reservations/{rid}?err=void_failed",
                                         status_code=303)
-            r.payment_status = "voided"
-            payment_note = "card hold voided. "
-            await _log(session, r, agent, "void", "auto-voided on cancel")
+            payment_note = "card hold released. "
         elif r.payment_status == "captured":
             payment_note = "payment already CAPTURED — use Refund if money is owed back. "
         r.status = "cancelled"

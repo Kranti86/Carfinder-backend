@@ -92,6 +92,37 @@ async def _post(path: str, body: dict | None = None) -> tuple[bool, dict]:
         return ok, data
 
 
+async def _get(path: str) -> tuple[bool, dict]:
+    async with httpx.AsyncClient(timeout=20) as client:
+        tok = await _access_token(client)
+        if not tok:
+            return False, {"message": "paypal auth failed"}
+        r = await client.get(f"{_base()}{path}", headers={"Authorization": f"Bearer {tok}"})
+        try:
+            data = r.json() if r.content else {}
+        except Exception:
+            data = {}
+        return r.status_code == 200, data
+
+
+# Authorization statuses that mean money is really held for us.
+HELD_STATUSES = ("CREATED",)          # funds held, capturable
+PENDING_STATUSES = ("PENDING",)       # under review by PayPal — not guaranteed yet
+RELEASED_STATUSES = ("DENIED", "VOIDED", "EXPIRED")  # nothing held any more
+
+
+def _decline_reason(auth: dict) -> str:
+    pr = auth.get("processor_response") or {}
+    bits = [f"status {auth.get('status', '?')}"]
+    if pr.get("response_code"):
+        bits.append(f"processor {pr['response_code']}")
+    if pr.get("avs_code"):
+        bits.append(f"AVS {pr['avs_code']}")
+    if pr.get("cvv_code"):
+        bits.append(f"CVV {pr['cvv_code']}")
+    return "card hold not approved: " + ", ".join(bits)
+
+
 def _amt(value: float) -> dict:
     return {"currency_code": "USD", "value": f"{value:.2f}"}
 
@@ -152,8 +183,13 @@ async def authorize(amount: float, order_id: str, *, reservation_id: str) -> Pay
             held = float((auth.get("amount") or {}).get("value"))
         except (TypeError, ValueError):
             held = None
-        return PayResult(ok=True, ref=auth["id"], status=auth.get("status", ""),
-                         live=True, amount=held)
+        status = str(auth.get("status", "")).upper()
+        # PayPal answers 201 even when the bank DECLINES the hold — the real result is
+        # the authorization's own status. Only CREATED (or PENDING review) holds money.
+        if status not in HELD_STATUSES + PENDING_STATUSES:
+            return PayResult(ok=False, ref=auth.get("id", ""), status=status,
+                             message=_decline_reason(auth), live=True, amount=held)
+        return PayResult(ok=True, ref=auth["id"], status=status, live=True, amount=held)
     return PayResult(ok=False, message=data.get("message", "authorize failed"), live=True)
 
 
@@ -169,6 +205,15 @@ async def capture(authorization_id: str, amount: float | None = None) -> PayResu
     if ok and data.get("id"):
         return PayResult(ok=True, ref=data["id"], status=data.get("status", ""), live=True)
     return PayResult(ok=False, message=data.get("message", "capture failed"), live=True)
+
+
+async def authorization_status(authorization_id: str) -> str:
+    """Current status of an authorization (CREATED, DENIED, VOIDED, EXPIRED, CAPTURED…).
+    Empty string if it can't be read."""
+    if not is_configured() or not authorization_id:
+        return ""
+    ok, data = await _get(f"/v2/payments/authorizations/{authorization_id}")
+    return str(data.get("status", "")).upper() if ok else ""
 
 
 async def void(authorization_id: str) -> PayResult:

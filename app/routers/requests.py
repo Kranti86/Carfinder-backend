@@ -285,6 +285,14 @@ async def create_request(request: Request, background: BackgroundTasks,
                                  action="authorize_mismatch",
                                  detail=f"held ${res.amount:.2f} != expected ${amount:.2f}; voided"))
             r.payment_status = "failed"
+        elif res.ok and res.status in payments.PENDING_STATUSES:
+            # PayPal is reviewing the hold: not guaranteed yet. The webhook flips it to
+            # authorized when PayPal approves it.
+            r.payment_status = "pending"
+            r.payment_ref = res.ref
+            session.add(AuditLog(reservation_id=r.id, agent_email="system",
+                                 action="authorize_pending",
+                                 detail=f"${amount:.2f} hold under PayPal review ref={res.ref}"))
         elif res.ok:
             r.payment_status = "authorized"
             r.payment_ref = res.ref
@@ -296,6 +304,8 @@ async def create_request(request: Request, background: BackgroundTasks,
                                  detail=f"${amount:.2f} hold {'(live)' if res.live else '(recorded)'} ref={res.ref}"))
         else:
             r.payment_status = "failed"
+            if res.ref:
+                r.payment_ref = res.ref
             session.add(AuditLog(reservation_id=r.id, agent_email="system",
                                  action="authorize_failed", detail=res.message))
 

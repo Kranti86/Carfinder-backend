@@ -279,3 +279,65 @@ def test_metrics_and_docs_hidden(client):
     assert client.get("/metrics").status_code == 404
     assert client.get("/docs").status_code == 404
     assert client.get("/openapi.json").status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# declined card holds (PayPal answers 201 but the authorization is DENIED)
+# --------------------------------------------------------------------------- #
+DENIED_ORDER = {"id": "4JT07301ND332711B", "status": "COMPLETED", "purchase_units": [{
+    "payments": {"authorizations": [{
+        "status": "DENIED", "id": "1SX91007VN2650621",
+        "amount": {"currency_code": "USD", "value": "4.56"},
+        "processor_response": {"avs_code": "N", "cvv_code": "D", "response_code": "9510"}}]}}]}
+
+
+def test_authorize_denied_is_not_a_hold(monkeypatch):
+    async def fake_post(path, body=None):
+        return True, DENIED_ORDER
+    monkeypatch.setattr(payments, "is_configured", lambda: True)
+    monkeypatch.setattr(payments, "_post", fake_post)
+    res = asyncio.run(payments.authorize(4.56, "4JT07301ND332711B", reservation_id="r1"))
+    assert res.ok is False and res.status == "DENIED" and res.ref == "1SX91007VN2650621"
+    assert "processor 9510" in res.message and "AVS N" in res.message
+
+
+def test_denied_hold_marks_booking_failed(client, monkeypatch):
+    job, vid = seed_quote(client)
+    order_id = client.post("/paypal/create-order", headers=headers(), json={
+        "job_id": job, "vehicle_id": vid, "customer": CUSTOMER}).json()["order_id"]
+
+    async def denied(amount, oid, *, reservation_id):
+        return payments.PayResult(ok=False, ref="AUTH-DENIED", status="DENIED",
+                                  message="card hold not approved: status DENIED", live=True)
+    monkeypatch.setattr(payments, "authorize", denied)
+    d = client.post("/requests", headers=headers(),
+                    json={"paypal_order_id": order_id, "customer": CUSTOMER}).json()
+    assert d["payment_status"] == "failed" and d["status"] == "new"
+    res = run(client, _get_res, d["id"])
+    assert res.amount_authorized == 0 and res.authorized_at is None
+
+
+def test_cancel_succeeds_when_hold_was_already_denied(client, monkeypatch):
+    job, vid = seed_quote(client)
+    d = client.post("/requests", headers=headers(), json={
+        "job_id": job, "vehicle_id": vid, "customer": CUSTOMER}).json()
+    # a booking wrongly left as "authorized" on a hold PayPal actually denied
+    run(client, _update_res, d["id"], payment_status="authorized", status="authorized",
+        payment_ref="1SX91007VN2650621")
+
+    async def void_fails(ref):
+        return payments.PayResult(ok=False, message="paypal http 422")
+
+    async def status_denied(ref):
+        return "DENIED"
+    monkeypatch.setattr(payments, "void", void_fails)
+    monkeypatch.setattr(payments, "authorization_status", status_denied)
+
+    aid = run(client, _make_agent)
+    client.cookies.set(COOKIE_NAME, make_session(aid))
+    r = client.post(f"/admin/reservations/{d['id']}/action", data={"action": "cancel"},
+                    follow_redirects=False)
+    client.cookies.clear()
+    assert r.status_code == 303 and "err=" not in r.headers["location"]
+    res = run(client, _get_res, d["id"])
+    assert res.status == "cancelled" and res.payment_status == "failed"
