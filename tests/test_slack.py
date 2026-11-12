@@ -160,7 +160,7 @@ def test_user_management(client, slack_env):
 def test_capture_button_then_refund(client, slack_env):
     rid = held_booking(client)
     click(client, "claim", rid)
-    assert "Claimed" in slack_env[-1]["text"]
+    assert "Claimed —" in slack_env[-1]["text"]
     click(client, "capture", rid)
     assert "Captured" in slack_env[-1]["text"] and slack_env[-1]["replace_original"]
     res = run(client, _get_res, rid)
