@@ -215,7 +215,7 @@ async def perform(session, r: Reservation, agent, action: str, value: str = "",
 
     elif action == "claim":
         await log(session, r, agent, "claim", f"claimed by {who}")
-        result = Result(True, message=f"Claimed by {who}")
+        result = Result(True, message="Claimed")
 
     else:
         return Result(False, "unknown_action")
