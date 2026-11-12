@@ -45,7 +45,7 @@ SLACK_API = "https://slack.com/api"
 
 def verify(headers, body: bytes, secret: str | None = None, now: float | None = None) -> bool:
     """Slack request signing (v0)."""
-    secret = secret if secret is not None else os.environ.get("SLACK_SIGNING_SECRET", "")
+    secret = (secret if secret is not None else os.environ.get("SLACK_SIGNING_SECRET", "")).strip()
     ts = headers.get("x-slack-request-timestamp", "")
     sig = headers.get("x-slack-signature", "")
     if not secret or not ts or not sig:
@@ -57,7 +57,12 @@ def verify(headers, body: bytes, secret: str | None = None, now: float | None = 
         return False
     base = f"v0:{ts}:".encode() + body
     mine = "v0=" + hmac.new(secret.encode(), base, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(mine, sig)
+    if hmac.compare_digest(mine, sig):
+        return True
+    logger.warning("slack signature mismatch: SLACK_SIGNING_SECRET is %d chars (Slack's is 32 "
+                   "hex chars — use Basic Information → App Credentials → Signing Secret)",
+                   len(secret))
+    return False
 
 
 def admins() -> dict[str, str]:
