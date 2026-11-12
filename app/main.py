@@ -18,6 +18,7 @@ from .metrics import get_metrics
 from .db import init_db
 from .providers.http import close_client
 from .routers import admin, exports, health, ops, search, suggest, webhooks
+from .routers import slack as slack_router
 from .routers import requests as requests_router
 
 settings = get_settings()
@@ -84,6 +85,7 @@ app.include_router(requests_router.router)
 app.include_router(admin.router)
 app.include_router(exports.router)
 app.include_router(webhooks.router)
+app.include_router(slack_router.router)
 
 
 @app.get("/", tags=["health"])

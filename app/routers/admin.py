@@ -23,7 +23,7 @@ from ..config import get_settings
 from ..db import get_session
 from ..rate_limit import check_rate_limit
 from ..models_db import STATUS_FLOW, AuditLog, Reservation
-from ..services import audiences, conversions, email_service, notify, payments, settings_service
+from ..services import actions, audiences, conversions, email_service, notify, payments, settings_service
 
 logger = logging.getLogger("carfinder.admin")
 
@@ -35,28 +35,8 @@ def _login_redirect() -> RedirectResponse:
     return RedirectResponse("/admin/login", status_code=303)
 
 
-async def _release_hold(session, r, agent) -> bool:
-    """Void the card hold. If PayPal refuses because nothing is held any more (the hold
-    was DENIED, already VOIDED or EXPIRED), treat it as released. Returns True when no
-    money is held afterwards."""
-    res = await payments.void(r.payment_ref)
-    if res.ok:
-        r.payment_status = "voided"
-        await _log(session, r, agent, "void", f"card hold released {'(live)' if res.live else '(recorded)'}")
-        return True
-    status = await payments.authorization_status(r.payment_ref)
-    if status in payments.RELEASED_STATUSES:
-        r.payment_status = "voided" if status in ("VOIDED", "EXPIRED") else "failed"
-        await _log(session, r, agent, "void", f"nothing held: PayPal reports {status}")
-        return True
-    await _log(session, r, agent, "void_failed", res.message)
-    return False
-
-
-async def _log(session, r, agent, action, detail=""):
-    session.add(AuditLog(reservation_id=r.id, agent_id=getattr(agent, "id", None),
-                         agent_email=getattr(agent, "email", "system"),
-                         action=action, detail=detail))
+_release_hold = actions.release_hold   # kept for older imports
+_log = actions.log
 
 
 # --------------------------------------------------------------------------- #
@@ -243,7 +223,7 @@ async def reservation_detail(request: Request, rid: str,
     events = (await session.execute(
         select(AuditLog).where(AuditLog.reservation_id == rid)
         .order_by(AuditLog.created_at.desc()))).scalars().all()
-    errs = {"need_docs": "Attach the supplier confirmation PDF and enter the supplier "
+    errs = {**actions.ERRORS, "need_docs": "Attach the supplier confirmation PDF and enter the supplier "
                          "confirmation number before sending the final confirmation.",
             "confirm_first": "Send the final confirmation to the customer before marking fulfilled.",
             "void_failed": "Could not release the card hold, so the reservation was NOT cancelled. "
@@ -265,15 +245,9 @@ async def upload_document(request: Request, rid: str, file: UploadFile = File(..
     r = await session.get(Reservation, rid)
     if not r:
         return HTMLResponse("Reservation not found", status_code=404)
-    blob = await file.read()
-    if len(blob) > 10 * 1024 * 1024:
+    res = await actions.attach_document(session, r, agent, await file.read(), file.filename or "")
+    if not res.ok:
         return RedirectResponse(f"/admin/reservations/{rid}?err=need_docs", status_code=303)
-    r.confirmation_doc = blob
-    r.confirmation_doc_name = (file.filename or "confirmation.pdf")[:200]
-    await _log(session, r, agent, "upload_doc", r.confirmation_doc_name)
-    await session.commit()
-    if alert:
-        await notify.payment_event(r, *alert)
     return RedirectResponse(f"/admin/reservations/{rid}", status_code=303)
 
 
@@ -302,117 +276,7 @@ async def reservation_action(request: Request, rid: str, background: BackgroundT
     r = await session.get(Reservation, rid)
     if not r:
         return HTMLResponse("Reservation not found", status_code=404)
-
-    alert: tuple[str, str] | None = None
-    who = agent.name or agent.email
-
-    if action == "capture":
-        res = await payments.capture(r.payment_ref, r.amount_authorized or r.pay_now_total)
-        if res.ok:
-            r.payment_status = "captured"
-            r.amount_captured = r.amount_authorized or r.pay_now_total
-            r.capture_ref = res.ref            # PayPal capture id, needed for refunds
-            r.status = "captured"
-            await _log(session, r, agent, "capture",
-                       f"${r.amount_captured:.2f} {'(live)' if res.live else '(recorded)'}")
-            alert = ("captured", f"${r.amount_captured:.2f} by {who}")
-        else:
-            await _log(session, r, agent, "capture_failed", res.message)
-            alert = ("capture_failed", res.message)
-
-    elif action == "refund":
-        if r.payment_status != "captured" or not r.capture_ref:
-            return RedirectResponse(f"/admin/reservations/{rid}?err=no_capture", status_code=303)
-        res = await payments.refund(r.capture_ref, r.amount_captured or None)
-        if res.ok:
-            r.payment_status = "refunded"
-            r.status = "cancelled"
-            await _log(session, r, agent, "refund",
-                       "refunded; REMEMBER: clawback rentalcover net if fully cancelled")
-            alert = ("refunded", f"by {who}")
-        else:
-            await _log(session, r, agent, "refund_failed", res.message)
-            alert = ("refund_failed", res.message)
-
-    elif action == "void":
-        if r.payment_status not in ("authorized", "pending") or not r.payment_ref:
-            return RedirectResponse(f"/admin/reservations/{rid}?err=no_hold", status_code=303)
-        if await _release_hold(session, r, agent):
-            r.status = "cancelled"
-            await _log(session, r, agent, "cancel",
-                       "clawback rentalcover net if policy issued")
-            alert = ("cancelled", f"hold released by {who}")
-        else:
-            await session.commit()
-            await notify.payment_event(r, "void_failed", f"tried by {who}")
-            return RedirectResponse(f"/admin/reservations/{rid}?err=void_failed", status_code=303)
-
-    elif action == "cancel":
-        reason = value.strip()
-        payment_note = ""
-        if r.payment_status in ("authorized", "pending") and r.payment_ref:
-            # Release the hold now, so the daily auto-capture can never charge it.
-            if not await _release_hold(session, r, agent):
-                await session.commit()
-                await notify.payment_event(r, "void_failed", f"cancel tried by {who}")
-                return RedirectResponse(f"/admin/reservations/{rid}?err=void_failed",
-                                        status_code=303)
-            payment_note = "card hold released. "
-        elif r.payment_status == "captured":
-            payment_note = "payment already CAPTURED — use Refund if money is owed back. "
-        r.status = "cancelled"
-        await _log(session, r, agent, "cancel",
-                   (f"reason: {reason}; " if reason else "") + payment_note +
-                   "customer emailed. Remember to clawback insurance if a policy was issued.")
-        alert = ("cancelled", f"by {who}" + (f" — {reason}" if reason else ""))
-        background.add_task(email_service.send_cancellation, {
-            "ref": r.id[:8], "customer_name": r.customer_name,
-            "customer_email": r.customer_email, "vehicle_name": r.vehicle_name,
-            "city": r.city, "reason": reason})
-
-    elif action == "confirm_send":
-        # Final supplier confirmation → email the customer the docs. Requires the
-        # supplier confirmation number AND the attached confirmation PDF.
-        if not r.supplier_reservation_number or not r.confirmation_doc:
-            return RedirectResponse(f"/admin/reservations/{rid}?err=need_docs", status_code=303)
-        r.confirmation_sent = True
-        r.confirmation_sent_at = datetime.now(timezone.utc)
-        r.status = "confirmed"
-        await _log(session, r, agent, "final_confirmation_sent",
-                   f"supplier #{r.supplier_reservation_number}, doc {r.confirmation_doc_name}")
-        alert = ("confirmed", f"by {who}")
-        background.add_task(email_service.send_final_confirmation, {
-            "ref": r.id[:8], "customer_name": r.customer_name, "customer_email": r.customer_email,
-            "supplier_reservation_number": r.supplier_reservation_number,
-            "vehicle_name": r.vehicle_name, "vehicle_type": r.vehicle_type, "supplier": r.supplier,
-            "city": r.city, "pickup_area": r.pickup_area, "pickup_datetime": r.pickup_datetime,
-            "dropoff_datetime": r.dropoff_datetime, "base_price": r.base_price,
-            "policy_number": r.policy_number,
-        }, bytes(r.confirmation_doc), r.confirmation_doc_name or "confirmation.pdf")
-
-    elif action == "fulfill":
-        # Locked until the final confirmation has been sent to the customer.
-        if not r.confirmation_sent:
-            return RedirectResponse(f"/admin/reservations/{rid}?err=confirm_first", status_code=303)
-        r.status = "fulfilled"
-        await _log(session, r, agent, "fulfill", "marked fulfilled + review invite sent")
-        alert = ("fulfilled", f"by {who}")
-        background.add_task(email_service.send_review_invite, {
-            "customer_name": r.customer_name, "customer_email": r.customer_email,
-            "vehicle_name": r.vehicle_name, "city": r.city, "ref": r.id[:8]})
-
-    elif action == "supplier_ref":
-        r.supplier_reservation_number = value.strip()
-        await _log(session, r, agent, "supplier_ref", f"set to {value.strip()}")
-
-    elif action == "policy":
-        r.policy_number = value.strip()
-        await _log(session, r, agent, "policy", f"policy {value.strip()}")
-
-    elif action == "note":
-        await _log(session, r, agent, "note", value.strip())
-
-    await session.commit()
-    if alert:
-        await notify.payment_event(r, *alert)
+    res = await actions.perform(session, r, agent, action, value, defer=background.add_task)
+    if not res.ok and res.error in actions.ERRORS:
+        return RedirectResponse(f"/admin/reservations/{rid}?err={res.error}", status_code=303)
     return RedirectResponse(f"/admin/reservations/{rid}", status_code=303)

@@ -28,7 +28,7 @@ def client():
 def sent(monkeypatch):
     box: list[str] = []
 
-    async def fake(text):
+    async def fake(text, blocks=None):
         box.append(text)
         return True
     monkeypatch.setattr(notify, "slack", fake)
