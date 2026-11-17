@@ -131,3 +131,36 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     reservation: Mapped[Reservation] = relationship(back_populates="events")
+
+
+class CityStat(Base):
+    """One place (airport or city) for the SEO pages: latest price facts.
+
+    Filled for free from real customer searches, plus a small daily budget of
+    searches for top airports (see services/seo.py)."""
+    __tablename__ = "city_stats"
+
+    slug: Mapped[str] = mapped_column(String(120), primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), default="")
+    kind: Mapped[str] = mapped_column(String(20), default="city")      # airport | city
+    iata: Mapped[str] = mapped_column(String(8), default="")
+    region: Mapped[str] = mapped_column(String(80), default="")        # e.g. "Florida"
+    lat: Mapped[float] = mapped_column(Float, default=0.0)
+    lon: Mapped[float] = mapped_column(Float, default=0.0)
+    stats: Mapped[str] = mapped_column(Text, default="{}")             # JSON from compute()
+    searches: Mapped[int] = mapped_column(Integer, default=0)          # real customer searches
+    seeded: Mapped[int] = mapped_column(Integer, default=0)            # budgeted refreshes
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class CityStatDay(Base):
+    """Daily price history per place (cheapest per day + averages by car type)."""
+    __tablename__ = "city_stat_days"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    slug: Mapped[str] = mapped_column(String(120), index=True)
+    day: Mapped[str] = mapped_column(String(10), index=True)            # YYYY-MM-DD
+    cheapest_per_day: Mapped[float | None] = mapped_column(Float, nullable=True)
+    avg_by_type: Mapped[str] = mapped_column(Text, default="{}")
+    car_count: Mapped[int] = mapped_column(Integer, default=0)

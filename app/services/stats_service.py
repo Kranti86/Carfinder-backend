@@ -41,6 +41,7 @@ def compute(cards, total_count, currency: str = "USD", days: int = STATS_DAYS) -
     for c in priced:
         by.setdefault(c.vehicle_type or "Other", []).append(c.price)
     avg_by_type = {t: round(sum(v) / len(v) / days) for t, v in sorted(by.items())}
+    min_by_type = {t: round(min(v) / days) for t, v in sorted(by.items())}
 
     suppliers = sorted({c.supplier for c in cards if c.supplier})
     pickups: list[str] = []
@@ -54,6 +55,7 @@ def compute(cards, total_count, currency: str = "USD", days: int = STATS_DAYS) -
         "cheapest_total": round(cheapest, 2) if cheapest is not None else None,
         "cheapest_per_day": round(cheapest / days) if cheapest is not None else None,
         "avg_by_type": avg_by_type,
+        "min_by_type": min_by_type,
         "suppliers": suppliers,
         "supplier_count": len(suppliers),
         "top_pickups": pickups[:6],
@@ -62,10 +64,17 @@ def compute(cards, total_count, currency: str = "USD", days: int = STATS_DAYS) -
     }
 
 
-async def store_from_cards(lat, lon, cards, total_count, currency="USD") -> None:
-    """Piggyback writer — called after every real search. Never raises."""
+async def store_from_cards(lat, lon, cards, total_count, currency="USD",
+                           days: int = STATS_DAYS, label: str | None = None) -> None:
+    """Piggyback writer — called after every real search. Never raises.
+
+    `days` must be the searched trip length: card prices are trip totals, so the
+    "from $/day" figure is total / real days (not a fixed 3)."""
     try:
-        await get_cache().set_json(_key(lat, lon), compute(cards, total_count, currency), _TTL)
+        stats = compute(cards, total_count, currency, days=days)
+        await get_cache().set_json(_key(lat, lon), stats, _TTL)
+        from .seo import record_search
+        await record_search(lat, lon, label, stats)
     except Exception as exc:  # noqa: BLE001
         logger.debug("stats piggyback store failed: %s", exc)
 
@@ -82,6 +91,12 @@ async def run_stats(lat: float, lon: float, city: str | None = None,
         cached = await cache.get_json(_key(lat, lon))
         if cached:
             return {**cached, "city": city} if city else cached
+    if cache_only or not force:
+        # Redis copy expired → fall back to the saved facts for this place (free)
+        from .seo import nearest_stats
+        saved = await nearest_stats(lat, lon)
+        if saved:
+            return {**saved, "city": city} if city else saved
     if cache_only:
         # cold cache + unverified → return empty rather than spending a credit
         return {"city": city} if city else {}

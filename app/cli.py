@@ -3,7 +3,8 @@
   python -m app.cli create-agent <email> <password> [name] [role]
   python -m app.cli capture-due            # capture holds older than 3 days
   python -m app.cli daily-digest           # post the daily summary to Slack
-  python -m app.cli daily                  # capture-due, then daily-digest (cron)
+  python -m app.cli seo-seed [N]           # refresh N stalest top-airport SEO pages (1 credit each)
+  python -m app.cli daily                  # capture-due, seo-seed, daily-digest (cron)
   python -m app.cli purge-reservations     # DELETE all reservations + audit logs
   python -m app.cli init-db                # create tables
   python -m app.cli export-conversions [conversion_name]
@@ -137,11 +138,23 @@ def main():
                                   args[4] if len(args) > 4 else "agent"))
     elif cmd == "capture-due":
         asyncio.run(_capture_due())
+    elif cmd == "seo-seed":
+        async def seed():
+            await init_db()
+            from .services.seo import seed_airports
+            done = await seed_airports(int(args[1]) if len(args) > 1 else None)
+            print(f"seo seed refreshed {len(done)}: {', '.join(done)}")
+        asyncio.run(seed())
     elif cmd == "daily-digest":
         asyncio.run(_daily_digest())
     elif cmd == "daily":
         async def both():
             await _capture_due()
+            try:
+                from .services.seo import seed_airports
+                print("seo seed:", await seed_airports())
+            except Exception as exc:  # noqa: BLE001 — never block capture/digest
+                print("seo seed failed:", exc)
             await _daily_digest()
         asyncio.run(both())
     elif cmd == "init-db":
