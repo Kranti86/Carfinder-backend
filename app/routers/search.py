@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request
+from fastapi import Response, APIRouter, BackgroundTasks, Depends, Request
 
 from ..config import Settings, get_settings
 from ..models import SearchJob, SearchQuery, VehicleDetail
@@ -61,6 +61,7 @@ async def _run_job(job_id: str, query: SearchQuery) -> None:
 @router.post("/search", response_model=SearchJob, status_code=202)
 async def create_search(
     request: Request,
+    response: Response,
     query: SearchQuery,
     background: BackgroundTasks,
     settings: Settings = Depends(get_settings),
@@ -78,6 +79,9 @@ async def create_search(
     )
     if not allowed:
         raise rate_limited()
+    from ..services.security import human_check
+    if not await human_check(request, response):
+        raise forbidden()
 
     job = await jobs.create_job()
     background.add_task(_run_job, job.job_id, query)

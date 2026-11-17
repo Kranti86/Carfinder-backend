@@ -41,6 +41,8 @@ class Agent(Base):
     password_hash: Mapped[str] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(20), default="agent")  # agent | admin
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Base32 secret for authenticator-app codes; empty = two-factor not turned on.
+    totp_secret: Mapped[str] = mapped_column(String(64), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 

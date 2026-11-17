@@ -229,6 +229,21 @@ async def _dispatch(s, agent: Agent, sub: str, args: list[str], response_url: st
             await say("Usage: `/rentals delete <REF>` (e.g. `8E4341AC`)")
         else:
             await say(f"Delete {r.id[:8].upper()}?", slack_ui.delete_prompt(r))
+    elif sub == "reset-2fa":
+        if not actions.is_super_admin(agent):
+            await say(":lock: Only a super admin can reset two-factor.")
+        elif not args:
+            await say("Usage: `/rentals reset-2fa <email>`")
+        else:
+            a = (await s.execute(select(Agent).where(Agent.email == args[0].lower()))).scalar_one_or_none()
+            if not a:
+                await say(f"No login for {args[0]}.")
+            else:
+                a.totp_secret = ""
+                await s.commit()
+                await say(f"Two-factor reset for *{a.email}*. They sign in with the password only, "
+                          "then turn it on again under Two-factor.")
+                await notify.slack(f":warning: Two-factor was reset for {a.email} by {agent.email} (Slack).")
     elif sub in ("add-user", "adduser"):
         await _add_user(s, agent, args, say)
     elif sub in ("reset-password", "disable-user", "enable-user"):

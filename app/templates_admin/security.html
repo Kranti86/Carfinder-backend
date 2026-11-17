@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Two-factor sign-in — Therentalcars Ops</title>
+<style>
+body{font-family:system-ui,Segoe UI,Arial,sans-serif;background:#0b1d3a;color:#eaeef6;margin:0;padding:30px 16px}
+.card{max-width:520px;margin:0 auto;background:#12234a;padding:26px;border-radius:14px;border:1px solid rgba(212,175,55,.3)}
+h1{font-size:1.25rem;color:#d4af37;margin:0 0 6px}p,li{font-size:.92rem;line-height:1.5;opacity:.92}
+.qr{background:#fff;display:inline-block;padding:10px;border-radius:10px;margin:8px 0}
+code{background:#0d1b38;padding:4px 7px;border-radius:6px;letter-spacing:.06em;word-break:break-all}
+input{padding:11px;border-radius:8px;border:1px solid #2b3d66;background:#0d1b38;color:#fff;width:160px;font-size:1.1rem;letter-spacing:.2em}
+button{padding:11px 16px;border:0;border-radius:8px;background:#12b886;color:#fff;font-weight:700;cursor:pointer;margin-left:6px}
+.off{background:#a33}.ok{background:#14432f;border:1px solid #1d7a52;padding:9px;border-radius:8px}
+.err{background:#3a1620;border:1px solid #a33;padding:9px;border-radius:8px}a{color:#8fb6ff}
+</style></head><body><div class="card">
+<p><a href="/admin/reservations">&larr; Reservations</a></p>
+<h1>Two-factor sign-in</h1>
+{% if msg == 'on' %}<p class="ok">Two-factor is on. You'll need a code from your app each time you sign in.</p>{% endif %}
+{% if msg == 'off' %}<p class="err">Two-factor is off for this login.</p>{% endif %}
+{% if msg == 'bad_code' %}<p class="err">That code didn't match. Check your phone's clock and try the newest code.</p>{% endif %}
+{% if enabled %}
+  <p>Status: <b style="color:#5fe0a8">ON</b> for {{ agent.email }}.</p>
+  <p>Lost your phone? Sign-in still needs the code. A super admin can reset it from Slack with <code>/rentals reset-2fa {{ agent.email }}</code>.</p>
+  <form method="post" action="/admin/security"><input type="hidden" name="action" value="disable">
+    <p>To turn it off, enter a current code:</p>
+    <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required><button class="off">Turn off</button></form>
+{% else %}
+  <p>Status: <b style="color:#f7c6cf">OFF</b>. Anyone with your password can sign in.</p>
+  <ol>
+    <li>Install an authenticator app on your phone (Google Authenticator, Microsoft Authenticator or 1Password).</li>
+    <li>Scan this code, or type the key below into the app.</li>
+  </ol>
+  <div class="qr">{{ qr|safe }}</div>
+  <p>Key: <code>{{ secret }}</code></p>
+  <form method="post" action="/admin/security"><input type="hidden" name="action" value="enable">
+    <input type="hidden" name="secret" value="{{ secret }}">
+    <p>3. Enter the 6-digit code the app shows:</p>
+    <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required><button>Turn on</button></form>
+{% endif %}
+</div></body></html>

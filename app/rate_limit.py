@@ -17,12 +17,18 @@ from fastapi import Request
 from .cache import get_cache
 
 
-def _client_id(request: Request, session_id: str | None) -> str:
-    # X-Forwarded-For first hop is the real client behind Heroku's router.
+def client_ip(request: Request) -> str:
+    """The caller's IP. Railway's edge rewrites X-Forwarded-For with the real client
+    address (verified live: a forged value is replaced), so its first entry is trusted."""
     fwd = request.headers.get("x-forwarded-for", "")
-    ip = fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "unknown")
-    sid = session_id or request.headers.get("x-session-id", "")
-    return f"{ip}|{sid}" if sid else ip
+    return fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "unknown")
+
+
+def _client_id(request: Request, session_id: str | None) -> str:
+    # Limits are keyed on the IP ONLY. An earlier version mixed in a client-supplied
+    # session id, which let anyone get a fresh limit by sending a new X-Session-Id on
+    # every request (found in the Nov 2026 security review). session_id is ignored.
+    return client_ip(request)
 
 
 async def check_rate_limit(
