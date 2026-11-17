@@ -240,3 +240,28 @@ def test_admin_upload_no_longer_crashes(client):
     client.cookies.clear()
     assert r.status_code == 303
     assert run(client, _get_res, rid).confirmation_doc_name == "conf.pdf"
+
+
+def test_purge_gated(client, monkeypatch):
+    from app.auth import COOKIE_NAME, make_session
+    from tests.test_checkout import _make_agent
+    held_booking(client)
+    aid = run(client, _make_agent)
+    client.cookies.set(COOKIE_NAME, make_session(aid))
+    try:
+        monkeypatch.delenv("ALLOW_PURGE", raising=False)
+        assert client.get("/admin/purge").status_code == 404
+        monkeypatch.setenv("ALLOW_PURGE", "true")
+        assert "This cannot be undone" in client.get("/admin/purge").text
+        assert client.post("/admin/purge", data={"confirm": "yes"}).status_code == 400
+
+        async def count():
+            from sqlalchemy import func, select
+            from app.models_db import Reservation
+            async with session_factory()() as s:
+                return (await s.execute(select(func.count()).select_from(Reservation))).scalar_one()
+        assert run(client, count) > 0
+        r = client.post("/admin/purge", data={"confirm": "DELETE ALL BOOKINGS"})
+        assert "Deleted" in r.text and run(client, count) == 0
+    finally:
+        client.cookies.clear()
