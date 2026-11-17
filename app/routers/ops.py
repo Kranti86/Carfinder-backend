@@ -64,8 +64,18 @@ async def canary(token: str = Query(default="")) -> dict:
     Consumes one upstream call per invocation. If CANARY_TOKEN is set, it must be
     supplied as ?token=... so the endpoint can't be spammed to drain quota."""
     settings: Settings = get_settings()
-    if settings.canary_token and not secrets.compare_digest(token, settings.canary_token):
+    # No token configured = endpoint doesn't exist. It makes a paid upstream call,
+    # so it must never be open to the public.
+    if not settings.canary_token:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+    if not secrets.compare_digest(token, settings.canary_token):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid canary token.")
+    from ..budget import BudgetExhausted, spend_credit
+    try:
+        await spend_credit()            # counts against the same daily cap as searches
+    except BudgetExhausted:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                            detail="Daily search budget reached.")
 
     result = await run_canary()
     # 200 when healthy, 503 when the canary is red — so uptime checks can alert.

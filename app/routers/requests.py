@@ -22,7 +22,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -87,6 +87,7 @@ async def online_config() -> dict:
     s = get_settings()
     return {
         "service_fee_enabled": await settings_service.service_fee_enabled(),
+        "turnstile_site_key": os.environ.get("TURNSTILE_SITE_KEY", "") if os.environ.get("TURNSTILE_SECRET_KEY") else "",
         "currency": "USD",
         "insurance": {
             "enabled": s.insurance_enabled,
@@ -121,6 +122,10 @@ async def paypal_create_order(request: Request,
                           settings.order_rate_window)
     if blocked:
         return blocked
+    from ..services.security import human_check
+    hdrs = Response()
+    if not await human_check(request, hdrs):
+        return _err("human_check", "Please complete the security check and try again.", 403)
     body = await _body(request)
     job_id = str(body.get("job_id") or "")
     vehicle_id = str(body.get("vehicle_id") or "")
@@ -140,6 +145,7 @@ async def paypal_create_order(request: Request,
     await quotes.remember_order(res.ref, reservation_id=reservation_id, job_id=job_id,
                                 vehicle_id=vehicle_id, insurance=insurance, amount=q["pay_now"])
     return {"ok": True, "order_id": res.ref, "amount": q["pay_now"],
+            "human_pass": hdrs.headers.get("X-Human-Pass", ""),
             "configured": payments.is_configured()}
 
 
@@ -207,6 +213,11 @@ async def create_request(request: Request, background: BackgroundTasks,
         return _err("bad_customer", "Please enter a name, a valid email and a phone number.", 400)
 
     order_id = str(payload.get("paypal_order_id") or "")
+    if not order_id:
+        # Paid bookings were already checked at create-order; unpaid ones are checked here.
+        from ..services.security import human_check
+        if not await human_check(request, Response()):
+            return _err("human_check", "Please complete the security check and try again.", 403)
     order = None
     if order_id:
         order = await quotes.get_order(order_id)
@@ -298,6 +309,11 @@ async def create_request(request: Request, background: BackgroundTasks,
             r.payment_status = "failed"
             if res.ref:
                 r.payment_ref = res.ref
+            from ..services.security import count_and_alert
+            await count_and_alert("declines", 3600, 3, (
+                ":rotating_light: *{n} card declines in the last hour.* This can be card testing "
+                "(criminals checking stolen cards). If you don't recognise these bookings, turn "
+                "online payments off in /admin → Settings and tell PayPal."))
             session.add(AuditLog(reservation_id=r.id, agent_email="system",
                                  action="authorize_failed", detail=res.message))
 
@@ -306,5 +322,10 @@ async def create_request(request: Request, background: BackgroundTasks,
     await notify.new_reservation(r, amount)
 
     data = _reservation_public(r)
-    background.add_task(email_service.send_confirmation, data)
+    # Email only real bookings: a held card (or in PayPal review), or reservation-only
+    # mode with no online payment. A declined or unpaid request gets no email, so a
+    # bot can't use the booking form to send mail to strangers in our name.
+    fees_on = await settings_service.service_fee_enabled()
+    if r.payment_status in ("authorized", "pending") or (r.payment_status == "none" and (not fees_on or amount <= 0)):
+        background.add_task(email_service.send_confirmation, data)
     return {**data, "conversion_value": _margin(r)}

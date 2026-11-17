@@ -31,6 +31,17 @@ async def spend_credit() -> None:
     count = await get_cache().incr_with_ttl(f"upstream_budget:{day}", 60 * 60 * 26)
     if count == 0:  # counter backend hiccup → fail open, like the rate limiter
         return
+    if count in (int(cap * 0.8), cap):
+        try:
+            from .services.security import alert_once
+            pct = "100%" if count == cap else "80%"
+            await alert_once(f"budget:{day}:{pct}", (
+                f":money_with_wings: *Search budget {pct} used* today ({count}/{cap} paid searches). "
+                + ("New searches are now refused until midnight UTC. If traffic looks fake, "
+                   "a bot may be scraping; raise `UPSTREAM_DAILY_CAP` only if it's real customers."
+                   if count == cap else "Unusual if bookings are quiet — check for bots.")), ttl=60 * 60 * 26)
+        except Exception:  # noqa: BLE001
+            pass
     if count > cap:
         get_metrics().incr("upstream_budget_exhausted")
         logger.error("upstream daily cap reached (%s) — refusing paid call", cap)

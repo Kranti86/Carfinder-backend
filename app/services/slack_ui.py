@@ -211,5 +211,6 @@ HELP = """*Therentalcars from Slack* — `/rentals <command>`
 • `add-user <email> <name> [admin]` — create a login (temporary password shown only to you)
 • `reset-password <email>` · `disable-user <email>` · `enable-user <email>`
 • `delete <REF>` — permanently delete a booking (super admin only)
+• `reset-2fa <email>` — clear someone's two-factor if they lost their phone (super admin only)
 • `whoami` — your Slack member ID
 Buttons on each booking: Claim · Capture · Send confirmation · Mark fulfilled · Refund · Cancel · Add note"""

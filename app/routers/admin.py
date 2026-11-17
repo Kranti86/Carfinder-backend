@@ -49,11 +49,18 @@ async def login_page(request: Request):
 
 @router.post("/login")
 async def login_submit(request: Request, email: str = Form(...), password: str = Form(...),
-                       session: AsyncSession = Depends(get_session)):
+                       code: str = Form(""), session: AsyncSession = Depends(get_session)):
+    from ..rate_limit import client_ip
+    from ..services import security
     settings = get_settings()
+    ip = client_ip(request)
     if not await check_rate_limit(request, bucket="admin-login", limit=settings.login_rate_limit,
                                   window=settings.login_rate_window):
         logging.getLogger("carfinder.admin").warning("admin login rate-limited")
+        await security.alert_once(f"login-lock:{ip}", (
+            f":rotating_light: *Admin login blocked* after {settings.login_rate_limit} tries in "
+            f"15 min from IP `{ip}` (last email tried: {notify._esc(email[:80])}). "
+            "If this wasn't you, someone is guessing passwords."))
         return templates.TemplateResponse(
             request=request, name="login.html",
             context={"error": "Too many attempts. Wait 15 minutes and try again."},
@@ -63,10 +70,62 @@ async def login_submit(request: Request, email: str = Form(...), password: str =
         return templates.TemplateResponse(
             request=request, name="login.html",
             context={"error": "Invalid email or password."}, status_code=401)
+    if agent.totp_secret:
+        good = security.totp_ok(agent.totp_secret, code) and \
+            await security.totp_fresh(agent.id, "".join(c for c in code if c.isdigit()))
+        if not good:
+            return templates.TemplateResponse(
+                request=request, name="login.html",
+                context={"error": "Enter the current 6-digit code from your authenticator app.",
+                         "email": email, "need_code": True}, status_code=401)
+    await security.alert_once(f"login:{agent.id}:{ip}", (
+        f":closed_lock_with_key: Admin sign-in: *{notify._esc(agent.email)}* from IP `{ip}` "
+        f"({security.ua_short(request.headers.get('user-agent', ''))})"
+        + ("" if agent.totp_secret else " — _two-factor is OFF for this login_")), ttl=3600)
     resp = RedirectResponse("/admin/reservations", status_code=303)
     resp.set_cookie(COOKIE_NAME, make_session(agent.id), max_age=SESSION_MAX_AGE,
                     httponly=True, samesite="lax", secure=True)
     return resp
+
+
+# --------------------------------------------------------------------------- #
+# two-factor setup (any signed-in agent, for their own login)
+# --------------------------------------------------------------------------- #
+@router.get("/security", response_class=HTMLResponse)
+async def security_page(request: Request, session: AsyncSession = Depends(get_session)):
+    from ..services import security
+    agent = await agent_from_request(request, session)
+    if not agent:
+        return _login_redirect()
+    ctx = {"agent": agent, "enabled": bool(agent.totp_secret), "msg": request.query_params.get("msg", "")}
+    if not agent.totp_secret:
+        secret = security.new_totp_secret()
+        ctx.update(secret=secret, qr=security.qr_svg(security.totp_uri(secret, agent.email)))
+    return templates.TemplateResponse(request=request, name="security.html", context=ctx)
+
+
+@router.post("/security")
+async def security_save(request: Request, action: str = Form(...), code: str = Form(""),
+                        secret: str = Form(""), session: AsyncSession = Depends(get_session)):
+    from ..services import security
+    agent = await agent_from_request(request, session)
+    if not agent:
+        return _login_redirect()
+    if action == "enable" and not agent.totp_secret:
+        if not security.totp_ok(secret, code):
+            return RedirectResponse("/admin/security?msg=bad_code", status_code=303)
+        agent.totp_secret = secret
+        await session.commit()
+        await notify.slack(f":lock: Two-factor turned ON for {notify._esc(agent.email)}.")
+        return RedirectResponse("/admin/security?msg=on", status_code=303)
+    if action == "disable" and agent.totp_secret:
+        if not security.totp_ok(agent.totp_secret, code):
+            return RedirectResponse("/admin/security?msg=bad_code", status_code=303)
+        agent.totp_secret = ""
+        await session.commit()
+        await notify.slack(f":warning: Two-factor turned *OFF* for {notify._esc(agent.email)}.")
+        return RedirectResponse("/admin/security?msg=off", status_code=303)
+    return RedirectResponse("/admin/security", status_code=303)
 
 
 @router.get("/logout")

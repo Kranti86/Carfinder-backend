@@ -94,3 +94,20 @@
   FAQ + breadcrumb structured data; canonical on the main domain; noindex when opened on
   the Railway domain directly.
 - `/stats` falls back to the saved facts when the 24h cache copy has expired.
+
+## Security hardening (Nov 2026 review)
+- **Rate limits could be bypassed** by sending a new `X-Session-Id` on every request
+  (confirmed live). Limits are now keyed on the client IP only.
+- `/canary` (a paid upstream call) is hidden unless `CANARY_TOKEN` is set, and counts
+  against the daily search cap.
+- Confirmation emails go out only for a held card (or in-review hold), or when nothing is
+  owed online — the booking form can no longer be used to email strangers.
+- Two-factor sign-in for /admin (authenticator app, QR setup at /admin/security, replay-proof
+  codes). Super admins can reset someone's two-factor from Slack: `/rentals reset-2fa <email>`.
+- Slack security alerts: every admin sign-in (flags logins without two-factor), password-
+  guessing lockouts, search budget at 80%/100%, 3+ card declines in an hour.
+- Bot check (Cloudflare Turnstile) on search, checkout and unpaid bookings — off until
+  `TURNSTILE_SITE_KEY` + `TURNSTILE_SECRET_KEY` are set. One pass covers 30 minutes per IP.
+- Security headers: HSTS everywhere; admin/Slack pages can't be framed and aren't cached.
+- Libraries upgraded: FastAPI 0.163.1 (Starlette 1.10), python-multipart 0.0.34,
+  jinja2 3.1.6, python-dotenv 1.2.2, pytest 9.0.3. pip-audit: no known vulnerabilities.

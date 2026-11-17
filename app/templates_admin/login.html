@@ -22,9 +22,11 @@
     <p>Agent sign in</p>
     {% if error %}<div class="err">{{ error }}</div>{% endif %}
     <label>Email</label>
-    <input name="email" type="email" autocomplete="username" required autofocus>
+    <input name="email" type="email" autocomplete="username" required {% if not email %}autofocus{% endif %} value="{{ email or '' }}">
     <label>Password</label>
     <input name="password" type="password" autocomplete="current-password" required>
+    <label>Authenticator code <span style="opacity:.6">(if two-factor is on)</span></label>
+    <input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" maxlength="7" {% if need_code %}autofocus{% endif %}>
     <button type="submit">Sign in</button>
   </form>
 </body></html>

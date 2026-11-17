@@ -55,6 +55,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["X-Human-Pass"],
 )
 
 @app.middleware("http")
@@ -76,6 +77,21 @@ async def timing_middleware(request: Request, call_next):
     metrics.incr(f"status_{response.status_code // 100}xx")
     response.headers["x-response-time-ms"] = f"{duration_ms:.1f}"
     return response
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    resp = await call_next(request)
+    h = resp.headers
+    h.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    h.setdefault("X-Content-Type-Options", "nosniff")
+    h.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    if request.url.path.startswith(("/admin", "/slack")):
+        # The ops portal must never load inside another site's frame (clickjacking).
+        h.setdefault("X-Frame-Options", "DENY")
+        h.setdefault("Content-Security-Policy", "frame-ancestors 'none'")
+        h.setdefault("Cache-Control", "no-store")
+    return resp
 
 
 app.include_router(health.router)
