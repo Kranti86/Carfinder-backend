@@ -1,0 +1,68 @@
+{% extends "_base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block desc %}{{ desc }}{% endblock %}
+{% block canonical %}{{ url }}{% endblock %}
+{% block head %}<script type="application/ld+json">{{ jsonld|safe }}</script>{% endblock %}
+{% block body %}
+<section class="hero">
+  <div class="crumbs"><a href="{{ base }}/">Home</a> › <a href="{{ base }}/car-rental">Car rental locations</a> › {{ r.name }}</div>
+  <h1>Car rental at {{ r.name }}</h1>
+  <p class="lead">
+    {% if st.cheapest_per_day %}Rental cars at {{ r.name }} currently start from about <b>${{ '{:,.0f}'.format(st.cheapest_per_day) }} per day</b>. {% endif %}
+    We recently compared <b>{{ st.car_count or 'many' }} cars</b>{% if st.supplier_count %} from <b>{{ st.supplier_count }} rental companies</b>{% endif %}{% if r.region %} in {{ r.region }}{% endif %}.
+    Reserve online in seconds — you pay a small booking fee now and the rental at the counter.
+  </p>
+  <a class="cta" href="{{ search_url }}">See today's prices</a><a class="cta ghost" href="tel:{{ phone_tel }}">Call {{ phone }}</a>
+  <div class="stats">
+    <div class="stat"><b>{% if st.cheapest_per_day %}${{ '{:,.0f}'.format(st.cheapest_per_day) }}{% else %}—{% endif %}</b><span>cheapest per day</span></div>
+    <div class="stat"><b>{{ st.car_count or '—' }}</b><span>cars compared</span></div>
+    <div class="stat"><b>{{ st.supplier_count or '—' }}</b><span>rental companies</span></div>
+    <div class="stat"><b>{{ updated }}</b><span>prices last checked</span></div>
+  </div>
+</section>
+
+{% if rows %}
+<h2>Prices by car type at {{ r.name }}</h2>
+<table><thead><tr><th>Car type</th><th>From / day</th><th>Typical / day</th></tr></thead><tbody>
+{% for t in rows %}<tr><td>{{ t.type }}</td>
+<td class="from">{% if t['from'] is not none %}${{ '{:,.0f}'.format(t['from']) }}{% else %}—{% endif %}</td>
+<td>{% if t.typical is not none %}${{ '{:,.0f}'.format(t.typical) }}{% else %}—{% endif %}</td></tr>{% endfor %}
+</tbody></table>
+<p class="note">Per-day prices include our booking fee and are based on {{ st.days or 3 }}-day rentals checked {{ updated }}. Prices change with dates and demand.</p>
+{% endif %}
+
+{% if trend|length > 1 %}
+<h2>Recent price trend</h2>
+<table><thead><tr><th>Week</th><th>Lowest per day</th></tr></thead><tbody>
+{% for w in trend %}<tr><td>{{ w.label }}</td><td>${{ '{:,.0f}'.format(w.low) }}</td></tr>{% endfor %}
+</tbody></table>
+{% endif %}
+
+{% if st.suppliers %}
+<h2>Rental companies at {{ r.name }}</h2>
+<div class="chips">{% for s in st.suppliers %}<span class="chip">{{ s }}</span>{% endfor %}</div>
+{% endif %}
+
+{% if st.top_pickups %}
+<h2>Pick-up areas</h2>
+<div class="chips">{% for p in st.top_pickups %}<span class="chip">{{ p }}</span>{% endfor %}</div>
+<p class="note">The exact counter address is sent with your booking confirmation.</p>
+{% endif %}
+
+<h2>How booking works</h2>
+<div class="grid">
+  <div class="card"><b>1. Compare</b><br><small>Live prices from rental companies near {{ r.name }}.</small></div>
+  <div class="card"><b>2. Reserve</b><br><small>Pay only the booking fee online — the rental is paid at pick-up.</small></div>
+  <div class="card"><b>3. Drive</b><br><small>Your confirmation includes the supplier reference and counter details.</small></div>
+</div>
+
+<h2>Frequently asked questions</h2>
+{% for q, a in faqs %}<details{% if loop.first %} open{% endif %}><summary>{{ q }}</summary><p>{{ a }}</p></details>{% endfor %}
+
+{% if nearby %}
+<h2>Nearby rental locations</h2>
+<div class="grid">{% for n in nearby %}<a class="card" href="{{ base }}/car-rental/{{ n.slug }}"><b>{{ n.name }}</b><br>{% if n['from'] %}<small>from <span class="from">${{ '{:,.0f}'.format(n['from']) }}/day</span></small>{% endif %}</a>{% endfor %}</div>
+{% endif %}
+
+<p style="margin-top:28px"><a class="cta" href="{{ search_url }}">Compare cars at {{ r.name }}</a></p>
+{% endblock %}

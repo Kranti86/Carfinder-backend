@@ -1,0 +1,16 @@
+{% extends "_base.html" %}
+{% block title %}Car Rental Locations — Airports &amp; Cities | Therentalcars{% endblock %}
+{% block desc %}Compare rental car prices at {{ airports|length + cities|length }} US airports and cities. Real prices, updated daily. Reserve online, pay the rental at pick-up.{% endblock %}
+{% block canonical %}{{ base }}/car-rental{% endblock %}
+{% block body %}
+<section class="hero">
+  <div class="crumbs"><a href="{{ base }}/">Home</a> › Car rental locations</div>
+  <h1>Car rental locations</h1>
+  <p class="lead">Real prices we've recently checked at airports and cities across the US. Pick a location to see prices by car type, rental companies and tips — or <a href="{{ base }}/online">search any location</a>.</p>
+</section>
+{% if airports %}<h2>Airports</h2>
+<div class="grid">{% for a in airports %}<a class="card" href="{{ base }}/car-rental/{{ a.slug }}"><b>{{ a.name }}</b><br><small>{% if a.region %}{{ a.region }} · {% endif %}{% if a['from'] %}from <span class="from">${{ '{:,.0f}'.format(a['from']) }}/day</span>{% endif %}</small></a>{% endfor %}</div>{% endif %}
+{% if cities %}<h2>Cities</h2>
+<div class="grid">{% for c in cities %}<a class="card" href="{{ base }}/car-rental/{{ c.slug }}"><b>{{ c.name }}</b><br><small>{% if c['from'] %}from <span class="from">${{ '{:,.0f}'.format(c['from']) }}/day</span>{% endif %}</small></a>{% endfor %}</div>{% endif %}
+{% if not airports and not cities %}<p class="lead">Location pages appear here as prices come in. <a href="{{ base }}/online">Search cars now</a>.</p>{% endif %}
+{% endblock %}

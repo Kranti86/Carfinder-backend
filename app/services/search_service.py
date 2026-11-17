@@ -93,8 +93,13 @@ async def run_search(query: SearchQuery) -> SearchResult:
         await _write_cache(key, result, settings.search_ttl_seconds)
         # Piggyback: refresh this city's SEO stats for free off a real search.
         try:
+            from .seo import trip_days
             from .stats_service import store_from_cards
-            await store_from_cards(query.lat, query.lon, cards, count)
+            if not query.is_one_way:       # one-way prices aren't a place's price
+                await store_from_cards(query.lat, query.lon, cards, count, query.currency,
+                                       days=trip_days(query.pickup_datetime,
+                                                      query.dropoff_datetime),
+                                       label=query.label)
         except Exception:  # noqa: BLE001
             pass
         return result

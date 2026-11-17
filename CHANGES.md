@@ -79,3 +79,18 @@
   in PayPal. Posts a Slack notice.
 - Slack: `/rentals delete <REF>` → confirm button. Super admins only.
 - The delete-all page (/admin/purge) is now super-admin only as well.
+
+## SEO location pages
+- Fix: "from $X/day" divided every search by 3 days; it now uses the real trip length
+  (a 7-day search was showing ~2.3× too high on the booking page tiles).
+- Every real search saves its place's price facts to Postgres (`city_stats`) plus a daily
+  history (`city_stat_days`) — no extra API calls. Searches within 4 km merge into one
+  place; top-30 US airports get their own airport pages.
+- `seo-seed`: refreshes the stalest airports, `SEO_SEED_PER_DAY` (default 5) per day, each
+  through the normal daily credit cap. Runs inside `python -m app.cli daily`.
+- Pages (served on the main domain via the frontend proxy): `/car-rental`,
+  `/car-rental/{slug}`, `/car-rental/sitemap.xml`, `/car-rental/popular.json`.
+  Published only with ≥10 cars and fresh (<45 days) prices; cities need ≥3 real searches.
+  FAQ + breadcrumb structured data; canonical on the main domain; noindex when opened on
+  the Railway domain directly.
+- `/stats` falls back to the saved facts when the 24h cache copy has expired.
