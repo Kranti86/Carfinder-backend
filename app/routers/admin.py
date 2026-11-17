@@ -233,7 +233,25 @@ async def reservation_detail(request: Request, rid: str,
     return templates.TemplateResponse(request=request, name="detail.html", context={
         "agent": agent, "r": r, "events": events,
         "payments_live": payments.is_configured(),
+        "is_super": actions.is_super_admin(agent),
         "err": errs.get(request.query_params.get("err", ""), "")})
+
+
+@router.post("/reservations/{rid}/delete")
+async def delete_reservation(request: Request, rid: str, confirm: str = Form(""),
+                             session: AsyncSession = Depends(get_session)):
+    agent = await agent_from_request(request, session)
+    if not agent:
+        return _login_redirect()
+    r = await session.get(Reservation, rid)
+    if not r:
+        return RedirectResponse("/admin/reservations", status_code=303)
+    res = await actions.delete_reservation(session, r, agent, confirm)
+    if not res.ok:
+        if res.error == "not_super":
+            return HTMLResponse("Only a super admin can delete reservations.", status_code=403)
+        return RedirectResponse(f"/admin/reservations/{rid}?err={res.error}", status_code=303)
+    return RedirectResponse("/admin/reservations?deleted=1", status_code=303)
 
 
 @router.post("/reservations/{rid}/upload")
@@ -316,7 +334,7 @@ async def purge_page(request: Request, session: AsyncSession = Depends(get_sessi
     agent = await agent_from_request(request, session)
     if not agent:
         return _login_redirect()
-    if agent.role != "admin" or not _purge_allowed():
+    if not actions.is_super_admin(agent) or not _purge_allowed():
         return HTMLResponse("Not available.", status_code=404)
     count = (await session.execute(select(func.count()).select_from(Reservation))).scalar_one()
     return HTMLResponse(_PURGE_PAGE.format(count=count, phrase=PURGE_PHRASE, msg=""))
@@ -329,7 +347,7 @@ async def purge(request: Request, confirm: str = Form(""),
     agent = await agent_from_request(request, session)
     if not agent:
         return _login_redirect()
-    if agent.role != "admin" or not _purge_allowed():
+    if not actions.is_super_admin(agent) or not _purge_allowed():
         return HTMLResponse("Not available.", status_code=404)
     count = (await session.execute(select(func.count()).select_from(Reservation))).scalar_one()
     if confirm.strip() != PURGE_PHRASE:

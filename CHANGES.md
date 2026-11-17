@@ -70,3 +70,12 @@
   downloads attached PDFs (scopes: commands, files:read).
 - Booking actions moved to `app/services/actions.py`, shared by /admin and Slack.
 - Fix: attaching a confirmation PDF in /admin no longer errors after saving.
+
+## Super-admin delete
+- `SUPER_ADMINS` (comma-separated emails, set on Railway) defines super admins. It can't be
+  granted from inside the app.
+- Booking page: "Delete reservation (super admin)" — type the ref to confirm. Refused while a
+  card hold is active (cancel first). Captured bookings warn that refunds must then be done
+  in PayPal. Posts a Slack notice.
+- Slack: `/rentals delete <REF>` → confirm button. Super admins only.
+- The delete-all page (/admin/purge) is now super-admin only as well.
