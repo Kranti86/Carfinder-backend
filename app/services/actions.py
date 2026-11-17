@@ -26,7 +26,46 @@ ERRORS = {
     "already_cancelled": "This booking is already cancelled.",
     "doc_too_big": "That file is over 10 MB.",
     "unknown_action": "Unknown action.",
+    "not_super": "Only a super admin can delete reservations.",
+    "hold_active": "A card hold is still active. Cancel the booking first (that releases "
+                   "the hold), then delete it.",
+    "ref_mismatch": "Type the booking reference exactly to confirm the delete.",
 }
+
+
+def is_super_admin(agent) -> bool:
+    """Super admins are listed by email in the SUPER_ADMINS env var (comma-separated),
+    so the power can't be granted from inside the app."""
+    import os
+    allowed = {e.strip().lower() for e in (os.environ.get("SUPER_ADMINS") or "").split(",")
+               if e.strip()}
+    return bool(agent) and getattr(agent, "active", True) and \
+        (getattr(agent, "email", "") or "").lower() in allowed
+
+
+async def delete_reservation(session, r, agent, confirm_ref: str) -> Result:
+    """Permanently delete one reservation and its history. Super admins only; refuses
+    while a card hold is active so money can never be left held with no record."""
+    from sqlalchemy import delete as sql_delete
+    import logging
+    if not is_super_admin(agent):
+        return Result(False, "not_super")
+    if (confirm_ref or "").strip().lower() != r.id[:8].lower():
+        return Result(False, "ref_mismatch")
+    if r.payment_status in ("authorized", "pending"):
+        return Result(False, "hold_active")
+    ref = r.id[:8].upper()
+    summary = notify.line(r)
+    money = (f" (had {notify.money(r.amount_captured)} captured — refund in PayPal if owed)"
+             if r.payment_status == "captured" else "")
+    await session.execute(sql_delete(AuditLog).where(AuditLog.reservation_id == r.id))
+    await session.delete(r)
+    await session.commit()
+    who = getattr(agent, "name", "") or agent.email
+    logging.getLogger("carfinder.admin").warning("reservation %s deleted by %s", ref, agent.email)
+    await notify.slack(f":wastebasket: Booking {ref} *deleted* by {notify._esc(who)}{money}\n"
+                       f"{summary.split(' — ', 1)[-1] if ' — ' in summary else summary}")
+    return Result(True, message=f"Booking {ref} deleted{money}")
 
 
 @dataclass

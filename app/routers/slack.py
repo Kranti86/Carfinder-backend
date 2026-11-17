@@ -221,6 +221,14 @@ async def _dispatch(s, agent: Agent, sub: str, args: list[str], response_url: st
         lines = [f"• {a.email} — {a.name or '—'} · {a.role}" + ("" if a.active else " · *disabled*")
                  for a in rows]
         await say("*Admin logins*\n" + ("\n".join(lines) or "none"))
+    elif sub == "delete":
+        r = await by_ref(s, args[0]) if args else None
+        if not actions.is_super_admin(agent):
+            await say(":lock: Only a super admin can delete reservations.")
+        elif not r:
+            await say("Usage: `/rentals delete <REF>` (e.g. `8E4341AC`)")
+        else:
+            await say(f"Delete {r.id[:8].upper()}?", slack_ui.delete_prompt(r))
     elif sub in ("add-user", "adduser"):
         await _add_user(s, agent, args, say)
     elif sub in ("reset-password", "disable-user", "enable-user"):
@@ -332,6 +340,23 @@ async def run_action(user: str, rid: str, action: str, value: str, response_url:
         await respond(response_url, _eph(f":x: Something went wrong: {type(exc).__name__}"))
 
 
+async def run_delete(user: str, rid: str, response_url: str) -> None:
+    try:
+        async with session_factory()() as s:
+            agent = await agent_for(s, user)
+            r = await s.get(Reservation, rid) if agent else None
+            if not agent or not r:
+                await respond(response_url, _eph(":lock: Not allowed, or the booking is already gone.",
+                                                 replace=True))
+                return
+            res = await actions.delete_reservation(s, r, agent, r.id[:8])
+            await respond(response_url, _eph(
+                f":wastebasket: {res.message}" if res.ok else f":x: {res.error_text}", replace=True))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("slack delete failed")
+        await respond(response_url, _eph(f":x: Something went wrong: {type(exc).__name__}"))
+
+
 async def run_confirm(user: str, rid: str, values: dict, response_url: str) -> None:
     try:
         async with session_factory()() as s:
@@ -415,6 +440,9 @@ async def interact(request: Request, background: BackgroundTasks):
                     background.add_task(respond, response_url, _eph(
                         f":x: Couldn't open the form ({res.get('error')}). "
                         "Is SLACK_BOT_TOKEN set?"))
+            return Response(status_code=200)
+        if action == "delete":
+            background.add_task(run_delete, user, rid, response_url)
             return Response(status_code=200)
         background.add_task(run_action, user, rid, action, "", response_url)
         return Response(status_code=200)

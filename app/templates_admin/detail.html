@@ -133,6 +133,22 @@
       <input name="value" placeholder="Add a note…"><button>Add</button></form>
   </div>
 
+  {% if is_super %}
+  <div class="card full" style="border:1px solid #e6a3a3">
+    <h3 style="color:#a12727">Delete reservation (super admin)</h3>
+    {% if r.payment_status in ('authorized', 'pending') %}
+      <div class="hint">A card hold is active. Cancel the booking first (releases the hold), then delete it.</div>
+    {% else %}
+      <div class="hint">Permanently removes this booking, its documents and its history. This cannot be undone.
+      {% if r.payment_status == 'captured' %}<b>{{ '%.2f'|format(r.amount_captured or 0) }} USD was captured</b> — after deleting you can only refund it inside PayPal.{% endif %}</div>
+      <form class="row" method="post" action="/admin/reservations/{{ r.id }}/delete" style="margin-top:10px"
+            onsubmit="return confirm('Delete booking {{ r.id[:8] }} permanently?')">
+        <input name="confirm" placeholder="Type {{ r.id[:8] }} to confirm" autocomplete="off">
+        <button class="b-void">Delete permanently</button></form>
+    {% endif %}
+  </div>
+  {% endif %}
+
   <div class="card full"><h3>Audit trail</h3>
     <div class="timeline">
       {% for e in events %}

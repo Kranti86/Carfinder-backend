@@ -247,6 +247,11 @@ def test_purge_gated(client, monkeypatch):
     from tests.test_checkout import _make_agent
     held_booking(client)
     aid = run(client, _make_agent)
+
+    async def email_of():
+        async with session_factory()() as s:
+            return (await s.get(Agent, aid)).email
+    monkeypatch.setenv("SUPER_ADMINS", run(client, email_of))
     client.cookies.set(COOKIE_NAME, make_session(aid))
     try:
         monkeypatch.delenv("ALLOW_PURGE", raising=False)
@@ -263,5 +268,78 @@ def test_purge_gated(client, monkeypatch):
         assert run(client, count) > 0
         r = client.post("/admin/purge", data={"confirm": "DELETE ALL BOOKINGS"})
         assert "Deleted" in r.text and run(client, count) == 0
+    finally:
+        client.cookies.clear()
+
+
+def _super_env(monkeypatch, email):
+    monkeypatch.setenv("SUPER_ADMINS", email)
+
+
+def test_super_admin_delete_admin_page(client, monkeypatch):
+    from app.auth import COOKIE_NAME, make_session
+    from app.models_db import Agent
+
+    async def mk(email, role):
+        async with session_factory()() as s:
+            a = Agent(email=email, name=email.split("@")[0], role=role, password_hash=hash_password("x"))
+            s.add(a)
+            await s.commit()
+            return a.id
+    boss = f"boss-{uuid.uuid4().hex[:6]}@ops.test"
+    plain = f"admin-{uuid.uuid4().hex[:6]}@ops.test"
+    boss_id, plain_id = run(client, mk, boss, "admin"), run(client, mk, plain, "admin")
+    _super_env(monkeypatch, boss)
+    rid = held_booking(client)
+    try:
+        # ordinary admin: no delete box, delete refused
+        client.cookies.set(COOKIE_NAME, make_session(plain_id))
+        assert "Delete reservation (super admin)" not in client.get(f"/admin/reservations/{rid}").text
+        assert client.post(f"/admin/reservations/{rid}/delete", data={"confirm": rid[:8]},
+                           follow_redirects=False).status_code == 403
+        # super admin: refused while the hold is active
+        client.cookies.set(COOKIE_NAME, make_session(boss_id))
+        assert "Delete reservation (super admin)" in client.get(f"/admin/reservations/{rid}").text
+        r = client.post(f"/admin/reservations/{rid}/delete", data={"confirm": rid[:8]},
+                        follow_redirects=False)
+        assert "err=hold_active" in r.headers["location"]
+        # cancel (releases hold), wrong ref refused, right ref deletes
+        client.post(f"/admin/reservations/{rid}/action", data={"action": "cancel"}, follow_redirects=False)
+        r = client.post(f"/admin/reservations/{rid}/delete", data={"confirm": "nope"}, follow_redirects=False)
+        assert "err=ref_mismatch" in r.headers["location"]
+        r = client.post(f"/admin/reservations/{rid}/delete", data={"confirm": rid[:8].upper()},
+                        follow_redirects=False)
+        assert r.headers["location"].startswith("/admin/reservations?deleted")
+        assert run(client, _get_res, rid) is None
+    finally:
+        client.cookies.clear()
+
+
+def test_super_admin_delete_slack(client, slack_env, monkeypatch):
+    import os
+    owner_email = os.environ["SLACK_ADMINS"].split(":", 1)[1]
+    rid = held_booking(client)
+    cmd(client, f"delete {rid[:8]}")
+    assert "super admin" in slack_env[-1]["text"]                  # not super yet
+    _super_env(monkeypatch, owner_email)
+    cmd(client, f"delete {rid[:8]}")
+    assert "hold is active" in json.dumps(slack_env[-1]["blocks"])  # must cancel first
+    run(client, _update_res, rid, payment_status="voided", status="cancelled")
+    cmd(client, f"delete {rid[:8]}")
+    assert "bk:delete" in json.dumps(slack_env[-1]["blocks"])
+    click(client, "delete", rid)
+    assert "deleted" in slack_env[-1]["text"] and slack_env[-1]["replace_original"]
+    assert run(client, _get_res, rid) is None
+
+
+def test_purge_needs_super_admin(client, monkeypatch):
+    from app.auth import COOKIE_NAME, make_session
+    from tests.test_checkout import _make_agent
+    aid = run(client, _make_agent)
+    monkeypatch.setenv("ALLOW_PURGE", "true")
+    monkeypatch.setenv("SUPER_ADMINS", "someone-else@ops.test")
+    client.cookies.set(COOKIE_NAME, make_session(aid))
+    try:
+        assert client.get("/admin/purge").status_code == 404
     finally:
         client.cookies.clear()

@@ -77,6 +77,19 @@ def action_buttons(r) -> list[dict]:
     return out
 
 
+def delete_prompt(r) -> list[dict]:
+    if r.payment_status in ("authorized", "pending"):
+        return [{"type": "section", "text": _md(
+            f"{notify.line(r)}\n:warning: A card hold is active. Cancel the booking first, "
+            "then delete it.")}]
+    warn = (f"\n:warning: {notify.money(r.amount_captured)} was captured — after deleting you can "
+            "only refund it inside PayPal." if r.payment_status == "captured" else "")
+    return [{"type": "section", "text": _md(f"{notify.line(r)}{warn}\n*This permanently deletes "
+                                           "the booking and its history.*")},
+            {"type": "actions", "elements": [_btn("Delete permanently", "delete", r.id, "danger", _confirm(
+                f"Delete {r.id[:8].upper()}?", "This can't be undone.", "Delete", danger=True))]}]
+
+
 def actions_block(r) -> list[dict]:
     if not interactive():
         return []
@@ -197,5 +210,6 @@ HELP = """*Therentalcars from Slack* — `/rentals <command>`
 • `users` — list admin logins
 • `add-user <email> <name> [admin]` — create a login (temporary password shown only to you)
 • `reset-password <email>` · `disable-user <email>` · `enable-user <email>`
+• `delete <REF>` — permanently delete a booking (super admin only)
 • `whoami` — your Slack member ID
 Buttons on each booking: Claim · Capture · Send confirmation · Mark fulfilled · Refund · Cancel · Add note"""
