@@ -280,3 +280,68 @@ async def reservation_action(request: Request, rid: str, background: BackgroundT
     if not res.ok and res.error in actions.ERRORS:
         return RedirectResponse(f"/admin/reservations/{rid}?err={res.error}", status_code=303)
     return RedirectResponse(f"/admin/reservations/{rid}", status_code=303)
+
+
+# ------------------------------------------------------------------ purge (one-off)
+# Deletes EVERY reservation and its history. Only reachable when ALLOW_PURGE=true is set
+# on the backend, only for admins, and only after typing the exact confirmation phrase.
+# Turn ALLOW_PURGE off again right after use.
+
+PURGE_PHRASE = "DELETE ALL BOOKINGS"
+
+
+def _purge_allowed() -> bool:
+    import os
+    return os.environ.get("ALLOW_PURGE", "").strip().lower() == "true"
+
+
+_PURGE_PAGE = """<!doctype html><meta charset=utf-8><title>Delete all bookings</title>
+<style>body{{font:15px system-ui;max-width:560px;margin:40px auto;padding:0 16px}}
+.box{{border:2px solid #c0392b;border-radius:8px;padding:16px 20px}}
+input{{font:inherit;padding:8px;width:100%;box-sizing:border-box}}
+button{{background:#c0392b;color:#fff;border:0;padding:10px 16px;border-radius:6px;font:inherit}}</style>
+<p><a href="/admin/reservations">&larr; Reservations</a></p>
+<div class=box><h2>Delete all bookings</h2>
+<p>This permanently deletes <b>{count}</b> reservation(s) and their history, including any
+attached confirmation PDFs. Admin logins and settings are kept. <b>This cannot be undone.</b>
+Captured payments stay in PayPal and can still be refunded there.</p>
+<form method=post action="/admin/purge">
+<p>Type <code>{phrase}</code> to confirm:</p>
+<p><input name=confirm autocomplete=off></p>
+<p><button>Delete everything</button></p></form>{msg}</div>"""
+
+
+@router.get("/purge", response_class=HTMLResponse)
+async def purge_page(request: Request, session: AsyncSession = Depends(get_session)):
+    agent = await agent_from_request(request, session)
+    if not agent:
+        return _login_redirect()
+    if agent.role != "admin" or not _purge_allowed():
+        return HTMLResponse("Not available.", status_code=404)
+    count = (await session.execute(select(func.count()).select_from(Reservation))).scalar_one()
+    return HTMLResponse(_PURGE_PAGE.format(count=count, phrase=PURGE_PHRASE, msg=""))
+
+
+@router.post("/purge", response_class=HTMLResponse)
+async def purge(request: Request, confirm: str = Form(""),
+                session: AsyncSession = Depends(get_session)):
+    from sqlalchemy import delete
+    agent = await agent_from_request(request, session)
+    if not agent:
+        return _login_redirect()
+    if agent.role != "admin" or not _purge_allowed():
+        return HTMLResponse("Not available.", status_code=404)
+    count = (await session.execute(select(func.count()).select_from(Reservation))).scalar_one()
+    if confirm.strip() != PURGE_PHRASE:
+        return HTMLResponse(_PURGE_PAGE.format(
+            count=count, phrase=PURGE_PHRASE,
+            msg="<p style='color:#c0392b'>Phrase didn't match — nothing was deleted.</p>"),
+            status_code=400)
+    await session.execute(delete(AuditLog))
+    await session.execute(delete(Reservation))
+    await session.commit()
+    logging.getLogger("carfinder.admin").warning("purge: %s deleted %s reservations",
+                                                 agent.email, count)
+    await notify.slack(f":broom: All bookings deleted ({count}) by {agent.name or agent.email}.")
+    return HTMLResponse(f"<p style='font:15px system-ui;margin:40px'>Deleted {count} reservation(s). "
+                        "<a href='/admin/reservations'>Back</a> — now set ALLOW_PURGE off.</p>")
